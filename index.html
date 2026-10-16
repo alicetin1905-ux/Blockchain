@@ -1437,7 +1437,8 @@ $('#autoscan').addEventListener('change', e => { S.settings.autoScan = e.target.
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.ui.drawer) { S.ui.drawer = null; renderDrawer(); } });
 
 async function switchMode(mode, fallback = false) {
-  save(); S = loadState(mode); S.fallback = fallback; localStorage.setItem('chainscout.mode', mode);
+  save(); S = loadState(mode); S.fallback = fallback;
+  if (!fallback) try { localStorage.setItem('chainscout.pref', mode); } catch (e) {}
   await ensureGenesis(); syncControls(); buildFilters(); renderDrawer(); renderNow(); nextScanAt = 0; nextRefreshAt = Date.now() + 15000;
   if (S.ui.tab === 'ledger') renderLedger(); if (S.ui.tab === 'settings') renderSettings();
   scan();
@@ -1452,7 +1453,7 @@ function tick() {
   updateTop();
 }
 (async function init() {
-  let mode = 'live'; try { mode = localStorage.getItem('chainscout.mode') || 'live'; } catch (e) {}
+  let mode = 'live'; try { mode = localStorage.getItem('chainscout.pref') || 'live'; } catch (e) {}
   S = loadState(mode === 'demo' ? 'demo' : 'live');
   await ensureGenesis(); syncControls(); buildFilters(); renderNow();
   if (S.ui.tab === 'ledger') renderLedger(); if (S.ui.tab === 'settings') renderSettings();
