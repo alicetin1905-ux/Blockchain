@@ -103,7 +103,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
 .filt-toggle{display:none}
 
-.strip-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.strip-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:14px}
+.netbox[hidden]+.strip-box{margin-top:0}
 .strip-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
 .strip-head h2{font-size:15px;letter-spacing:.06em;text-transform:uppercase}
 .strip{display:flex;align-items:stretch;overflow-x:auto;padding:12px 2px 8px;scroll-behavior:smooth}
@@ -181,7 +182,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .pb-s:hover b{color:var(--accent)}
 
 /* tokennetwerk */
-.netbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:14px}
+.netbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .netbox-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap}
 .netbox-h h2{font-size:15px;letter-spacing:.06em;text-transform:uppercase}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font:11px var(--f-mono);color:var(--mute)}
@@ -291,6 +292,11 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
     <section id="v-scanner" class="scan">
       <aside class="filters" id="filters" aria-label="Filters"></aside>
       <div style="min-width:0">
+        <section class="netbox" id="netbox" aria-label="Tokennetwerk">
+          <div class="netbox-h"><h2>Tokennetwerk</h2>
+            <div class="legend"><span><i style="background:var(--good)"></i>gevalideerd</span><span><i style="background:var(--accent)"></i>afgekeurd</span><span><i style="background:var(--bad)"></i>gevaar</span><span>grootte = liquiditeit · dichter bij het blok = hogere score</span></div></div>
+          <div class="netwrap"><canvas id="net" role="img" aria-label="Netwerk van tokens rond het gekozen blok"></canvas><div class="nettip" id="net-tip" hidden></div></div>
+        </section>
         <div class="strip-box">
           <div class="strip-head">
             <h2>Keten van scans</h2>
@@ -299,11 +305,6 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
           <div class="strip" id="strip"></div>
           <div class="bdetail" id="bdetail"></div>
         </div>
-        <section class="netbox" id="netbox" aria-label="Tokennetwerk">
-          <div class="netbox-h"><h2>Tokennetwerk</h2>
-            <div class="legend"><span><i style="background:var(--good)"></i>gevalideerd</span><span><i style="background:var(--accent)"></i>afgekeurd</span><span><i style="background:var(--bad)"></i>gevaar</span><span>grootte = liquiditeit · dichter bij het blok = hogere score</span></div></div>
-          <div class="netwrap"><canvas id="net" role="img" aria-label="Netwerk van tokens rond het gekozen blok"></canvas><div class="nettip" id="net-tip" hidden></div></div>
-        </section>
         <div class="toolbar">
           <div class="seg" role="group" aria-label="Weergave">
             <button data-act="view" data-v="beide" aria-pressed="true">BEIDE</button><button data-act="view" data-v="netwerk" aria-pressed="false">NETWERK</button><button data-act="view" data-v="kaarten" aria-pressed="false">KAARTEN</button>
