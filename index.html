@@ -168,6 +168,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .c-act{display:flex;gap:6px;margin-top:auto}
 .c-act .btn{flex:1}
 .since{font:11px var(--f-mono);color:var(--mute)}
+.srcchip{font:600 9px var(--f-mono);letter-spacing:.08em;color:var(--mute);border:1px solid var(--line);border-radius:4px;padding:2px 6px;align-self:center}
 .empty{padding:36px 16px;text-align:center;color:var(--mute);border:1px dashed var(--line);border-radius:10px}
 
 /* open posities, altijd zichtbaar */
@@ -317,6 +318,7 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
           </div>
           <button class="btn filt-toggle" data-act="filt">Filters</button>
           <div class="grow"><input type="search" id="q" placeholder="Zoek op symbool, naam of adres" aria-label="Zoeken"></div>
+          <select id="srcsel" aria-label="Bron"><option value="">Bron: alle</option><option value="new">Nieuw</option><option value="trend">Trending</option><option value="boost">Boost</option><option value="profile">Profiel</option></select>
           <select id="sort" aria-label="Sorteren">
             <option value="score">Sorteer: score</option><option value="liq">Liquiditeit</option><option value="v24">Volume 24u</option>
             <option value="age">Nieuwste eerst</option><option value="c1">Koers 1u</option>
@@ -341,7 +343,13 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
    ChainScout – DexScreener scanner, honeypot/rug-checks en paper trading
    Alles draait in de browser. Geen backend, geen API-sleutels.
    ========================================================================= */
-const DS = 'https://api.dexscreener.com';
+const DS = 'https://api.dexscreener.com', GT = 'https://api.geckoterminal.com/api/v2';
+const GT_NETS = ['solana', 'base', 'eth', 'bsc', 'arbitrum', 'polygon_pos', 'avax', 'optimism'];
+const GT_TO_DS = {eth: 'ethereum', polygon_pos: 'polygon', avax: 'avalanche'}, DS_TO_GT = {ethereum: 'eth', polygon: 'polygon_pos', avalanche: 'avax'};
+const MAJORS = new Set(['So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', '0x4200000000000000000000000000000000000006', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', '0x82af49447d8a07e3bd95bd0d56f35241523fbab1',
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', '0xdac17f958d2ee523a2206206994597c13d831ec7', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', '0x55d398326f99059ff775485246999027b3197955', '0x2791bca1f2de4661ed88a30c99a7a9449aa84174']);
+const SRC_LABEL = {profile: 'PROFIEL', boost: 'BOOST', topboost: 'TOP BOOST', new: 'NIEUW', trend: 'TRENDING', watch: 'WATCHLIST', search: 'ZOEK'};
 const CHAINS = {
   ethereum:{id:1,evm:1}, bsc:{id:56,evm:1}, base:{id:8453,evm:1}, arbitrum:{id:42161,evm:1},
   polygon:{id:137,evm:1}, avalanche:{id:43114,evm:1}, optimism:{id:10,evm:1}, solana:{sol:1}
@@ -442,13 +450,13 @@ function freshState(mode) {
   return {
     mode, scanning: false, refreshing: false, fallback: false,
     filters: {chains: [], ...PRESETS.gebalanceerd.f}, preset: 'gebalanceerd',
-    settings: {scanSec: 90, refreshSec: 20, posRefreshSec: 4, secPerScan: 12, startCash: 10000, query: '', watch: [], autoScan: true,
+    settings: {scanSec: 90, refreshSec: 20, posRefreshSec: 4, secPerScan: 12, sources: {profiles: true, boosts: true, newPools: true, trending: true}, startCash: 10000, query: '', watch: [], autoScan: true,
       trade: {size: 250, tp: 50, sl: 25, trail: 0},
       auto: {on: false, size: 250, max: 5, allowWarn: false}},
     blocks: [], sec: {}, seen: {}, tokens: {}, pending: {},
     pf: {cash: 10000, start: 10000, pos: [], hist: [], eq: [], fees: 0},
     ledger: [],
-    ui: {tab: 'scanner', sel: null, sort: 'score', onlyPass: false, q: '', drawer: null, chart: false, view: 'beide'}
+    ui: {tab: 'scanner', sel: null, sort: 'score', onlyPass: false, q: '', drawer: null, chart: false, view: 'beide', src: ''}
   };
 }
 let S = freshState('live');
@@ -464,7 +472,7 @@ function save() {
     const seen = Object.fromEntries(seenKeys.map(k => [k, S.seen[k]]));
     const data = {filters: S.filters, preset: S.preset, settings: S.settings, blocks: S.blocks.slice(-24), sec, seen,
       pf: {...S.pf, eq: S.pf.eq.slice(-400), hist: S.pf.hist.slice(-300)}, ledger: S.ledger.slice(-300),
-      ui: {sort: S.ui.sort, onlyPass: S.ui.onlyPass, tab: S.ui.tab, view: S.ui.view}};
+      ui: {sort: S.ui.sort, onlyPass: S.ui.onlyPass, tab: S.ui.tab, view: S.ui.view, src: S.ui.src}};
     localStorage.setItem(storeKey(S.mode), JSON.stringify(data));
   } catch (e) {}
 }
@@ -477,6 +485,7 @@ function loadState(mode) {
       Object.assign(s.filters, d.filters || {}); s.preset = d.preset || s.preset;
       Object.assign(s.settings, d.settings || {});
       s.settings.trade = {...freshState().settings.trade, ...(d.settings?.trade || {})};
+      s.settings.sources = {...freshState().settings.sources, ...(d.settings?.sources || {})};
       s.settings.auto = {...freshState().settings.auto, ...(d.settings?.auto || {})};
       s.blocks = d.blocks || []; s.sec = d.sec || {}; s.seen = d.seen || {};
       s.pf = {...s.pf, ...(d.pf || {})}; s.ledger = d.ledger || [];
@@ -499,7 +508,7 @@ function normPair(p) {
     b24: tx.h24?.buys || 0, s24: tx.h24?.sells || 0, b1: tx.h1?.buys || 0, s1: tx.h1?.sells || 0,
     c5: c.m5 ?? 0, c1: c.h1 ?? 0, c6: c.h6 ?? 0, c24: c.h24 ?? 0,
     fdv: p.fdv || 0, mcap: p.marketCap || p.fdv || 0, created: p.pairCreatedAt || Date.now(),
-    web: (p.info?.websites || []).length, soc: (p.info?.socials || []).length, boost: p.boosts?.active || 0, ts: Date.now()
+    web: (p.info?.websites || []).length, soc: (p.info?.socials || []).length, boost: p.boosts?.active || 0, ts: Date.now(), src: []
   };
 }
 function bestPerToken(pairs, wanted) {
@@ -524,22 +533,33 @@ async function fetchPairsFor(keys) {
   return bestPerToken(pairs, new Set(keys));
 }
 async function liveScan() {
-  const lists = await Promise.allSettled([
-    jget(DS + '/token-profiles/latest/v1'), jget(DS + '/token-boosts/latest/v1'), jget(DS + '/token-boosts/top/v1')]);
-  if (lists.every(l => l.status === 'rejected')) throw new Error('DexScreener niet bereikbaar');
-  const keys = new Set();
-  for (const l of lists) if (l.status === 'fulfilled' && Array.isArray(l.value))
-    for (const x of l.value) if (x.chainId && x.tokenAddress) keys.add(keyOf(x.chainId, x.tokenAddress));
-  for (const w of S.settings.watch) keys.add(keyOf(w.chain, w.addr));
+  const on = S.settings.sources, cand = new Map(), jobs = [];
+  const add = (chain, addr, tag) => {
+    if (!chain || !addr) return; const k = keyOf(chain, addr); let c = cand.get(k); if (!c) cand.set(k, c = {src: new Set()}); c.src.add(tag);
+  };
+  const ds = (path, tag) => jobs.push(jget(DS + path).then(l => { if (Array.isArray(l)) for (const x of l) add(x.chainId, x.tokenAddress, tag); }));
+  if (on.profiles) ds('/token-profiles/latest/v1', 'profile');
+  if (on.boosts) { ds('/token-boosts/latest/v1', 'boost'); ds('/token-boosts/top/v1', 'topboost'); }
+  const gt = (items, tag) => {
+    for (const it of items || []) {
+      const id = it.relationships?.base_token?.data?.id; if (!id) continue;
+      const i = id.indexOf('_'), net = id.slice(0, i), addr = id.slice(i + 1);
+      if (MAJORS.has(addr) || MAJORS.has(addr.toLowerCase())) continue;
+      add(GT_TO_DS[net] || net, addr, tag);
+    }
+  };
+  if (on.newPools) for (const n of (S.filters.chains.length ? S.filters.chains.map(c => DS_TO_GT[c] || c) : GT_NETS))
+    jobs.push(jget(`${GT}/networks/${encodeURIComponent(n)}/new_pools`).then(r => gt(r.data, 'new')));
+  if (on.trending) jobs.push(jget(`${GT}/networks/trending_pools?duration=1h`).then(r => gt(r.data, 'trend')));
+  if (jobs.length) { const res = await Promise.allSettled(jobs); if (res.every(r => r.status === 'rejected')) throw new Error('DexScreener en GeckoTerminal niet bereikbaar'); }
+  for (const w of S.settings.watch) add(w.chain, w.addr, 'watch');
   let extra = new Map();
   if (S.settings.query.trim()) {
-    try {
-      const r = await jget(DS + '/latest/dex/search?q=' + encodeURIComponent(S.settings.query.trim()));
-      extra = bestPerToken(r.pairs || []);
-    } catch (e) {}
+    try { extra = bestPerToken((await jget(DS + '/latest/dex/search?q=' + encodeURIComponent(S.settings.query.trim()))).pairs || []); } catch (e) {}
   }
-  const found = await fetchPairsFor([...keys]);
-  for (const [k, t] of extra) if (!found.has(k)) found.set(k, t);
+  const found = await fetchPairsFor([...cand.keys()]);
+  for (const [k, t] of extra) { if (!found.has(k)) found.set(k, t); (cand.get(k) || cand.set(k, {src: new Set()}).get(k)).src.add('search'); }
+  for (const [k, t] of found) t.src = [...(cand.get(k)?.src || [])];
   return [...found.values()];
 }
 
@@ -766,13 +786,19 @@ async function scan() {
     toks.forEach(t => { noteSeen(t); S.tokens[t.key] = t; });
     // blok samenstellen: de 40 beste op marktscore
     const ranked = toks.map(t => ({t, s: evaluate(t, {skipSec: true})})).sort((a, b) => b.s.score - a.s.score);
-    const top = ranked.slice(0, 40).map(x => x.t);
+    // het blok neemt alle tokens die de marktfilters halen, vult aan met de hoogste scores en garandeert plek voor nieuwe en trending tokens
+    const pick = new Map(), take = x => { if (!pick.has(x.t.key)) pick.set(x.t.key, x.t); };
+    ranked.filter(x => x.s.marketOk).slice(0, 40).forEach(take);
+    for (const x of ranked) { if (pick.size >= 40) break; take(x); }
+    for (const tag of ['new', 'trend']) ranked.filter(x => (x.t.src || []).includes(tag)).slice(0, 12).forEach(take);
+    const top = [...pick.values()];
     if (S.filters.secMode !== 'off') {
       const need = ranked.filter(x => x.s.marketOk && !(S.sec[x.t.key] && Date.now() - S.sec[x.t.key].ts < SEC_TTL)).slice(0, S.settings.secPerScan).map(x => x.t);
       setStatus(`Beveiligingschecks voor ${need.length} tokens…`);
       await Promise.race([runSec(need), sleep(28000)]);
     }
-    await mineBlock(top, toks.length);
+    const srcCount = {}; toks.forEach(t => (t.src || []).forEach(x => srcCount[x] = (srcCount[x] || 0) + 1));
+    await mineBlock(top, toks.length, srcCount);
     if (S.settings.auto.on) await autoTrade();
     await markPortfolio();
     lastScanInfo = '';
@@ -783,13 +809,13 @@ async function scan() {
     updateTop(); render(); saveSoon();
   }
 }
-async function mineBlock(tokens, total) {
+async function mineBlock(tokens, total, srcCount = {}) {
   const prev = S.blocks.length ? S.blocks.at(-1).hash : ZERO, ts = Date.now();
   const keys = tokens.map(t => t.key), merkle = await sha256(keys.join('|'));
   const {hash, nonce} = await mine(prev + ts + merkle, '00');
   const h = (S.blocks.at(-1)?.h ?? 0) + 1;
   const passed = tokens.filter(t => evaluate(t).pass).length;
-  S.blocks.push({h, hash, prev, ts, merkle, nonce, total, passed, snap: tokens}); Net.pulse();
+  S.blocks.push({h, hash, prev, ts, merkle, nonce, total, passed, snap: tokens, srcCount}); Net.pulse();
   if (S.blocks.length > 24) S.blocks.shift();
   S.ui.sel = null;
   toast(`Blok #${h} gemined: ${passed} van ${tokens.length} tokens gevalideerd`, passed ? 'good' : '');
@@ -899,7 +925,7 @@ async function fastRefresh() {
   try {
     const keys = new Set(S.pf.pos.map(p => p.key)); if (S.ui.drawer) keys.add(S.ui.drawer);
     const m = S.mode === 'demo' ? Demo.refresh([...keys], .12) : await fetchPairsFor([...keys]);
-    if (m.size) { for (const [k, t] of m) { noteSeen(t); S.tokens[k] = t; } S.lastPosUpdate = Date.now(); await markPortfolio(); }
+    if (m.size) { for (const [k, t] of m) { noteSeen(t); t.src = S.tokens[k]?.src || []; S.tokens[k] = t; } S.lastPosUpdate = Date.now(); await markPortfolio(); }
   } catch (e) {
   } finally {
     S.posRefreshing = false; nextPosAt = Date.now() + S.settings.posRefreshSec * 1000;
@@ -915,7 +941,7 @@ async function refreshPrices() {
     let m;
     if (S.mode === 'demo') m = Demo.refresh([...keys]);
     else { try { m = await fetchPairsFor([...keys].filter(k => !k.startsWith('?'))); } catch (e) { m = new Map(); } }
-    for (const [k, t] of m) { noteSeen(t); S.tokens[k] = t; }
+    for (const [k, t] of m) { noteSeen(t); t.src = S.tokens[k]?.src || []; S.tokens[k] = t; }
     await markPortfolio();
   } finally { S.refreshing = false; nextRefreshAt = Date.now() + S.settings.refreshSec * 1000; S.lastPosUpdate = Date.now(); render(); updateDrawerLive(); saveSoon(); }
 }
@@ -947,7 +973,7 @@ const Demo = (() => {
       quote: chain === 'solana' ? 'SOL' : 'WETH', icon: '', url: '', price, liq, v24, v6: v24 * .3, v1: v24 * .06,
       b24: Math.round(tx * buyShare), s24: hp ? 0 : Math.round(tx * (1 - buyShare)), b1: 0, s1: 0,
       c5: norm() * 2, c1: norm() * 9, c6: norm() * 20, c24: norm() * 40 + (rnd() < .1 ? 300 * rnd() : 0), fdv: price * sup, mcap: price * sup,
-      created: Date.now() - ageH * 36e5, web: rnd() < .55 ? 1 : 0, soc: rnd() < .65 ? 2 : 0, boost: 0, ts: Date.now()}};
+      created: Date.now() - ageH * 36e5, web: rnd() < .55 ? 1 : 0, soc: rnd() < .65 ? 2 : 0, boost: 0, ts: Date.now(), src: [pick(['new', 'new', 'trend', 'boost', 'profile'])]}};
   }
   function step(u, k = 1) {
     const t = u.t; t.ts = Date.now();
@@ -1284,7 +1310,7 @@ function cardHtml(t, ev, head) {
     <div class="c-price"><b>${px(t.price)}</b><span>${pct(t.c1)} <span class="mute">1u</span> · ${pct(t.c24, 0)} <span class="mute">24u</span></span></div>
     <div class="kv"><div><span>Liq</span><b>${usd(t.liq)}</b></div><div><span>Vol 24u</span><b>${usd(t.v24)}</b></div><div><span>MCap</span><b>${usd(t.mcap)}</b></div><div><span>Leeftijd</span><b>${ageStr(ageH)}</b></div></div>
     <div><div class="bs-bar" title="Kopen ${t.b24} / verkopen ${t.s24}"><i style="width:${bp}%"></i></div><div class="bs-lab"><span>${t.b24} kopen</span><span>${t.s24} verkopen</span></div></div>
-    <div class="pills">${ev.pass ? '<span class="pill ok">Gevalideerd</span>' : '<span class="pill unk">Afgekeurd</span>'}${verdictPill(ev.risk)}${held ? '<span class="pill ok">In bezit</span>' : ''}</div>
+    <div class="pills">${ev.pass ? '<span class="pill ok">Gevalideerd</span>' : '<span class="pill unk">Afgekeurd</span>'}${verdictPill(ev.risk)}${held ? '<span class="pill ok">In bezit</span>' : ''}${(t.src || []).map(x => `<span class="srcchip">${SRC_LABEL[x] || esc(x)}</span>`).join('')}</div>
     ${!ev.pass ? `<div class="fails">${ev.fails.slice(0, 3).map(x => `<span>${esc(x)}</span>`).join('')}${ev.fails.length > 3 ? `<span>+${ev.fails.length - 3}</span>` : ''}</div>` : ''}
     ${since != null && !head ? `<div class="since">Sinds dit blok: ${pct(since)}</div>` : ''}
     <div class="c-act"><button class="btn sm" data-act="check" data-k="${esc(t.key)}">Check</button><button class="btn sm" data-act="open" data-k="${esc(t.key)}">Details</button>${held ? `<button class="btn sm bad" data-act="sell" data-id="${S.pf.pos.find(p => p.key === t.key).id}" data-f="1">Verkoop alles</button>` : `<button class="btn sm good" data-act="open" data-k="${esc(t.key)}">Koop</button>`}</div>
@@ -1303,11 +1329,13 @@ function renderScanner() {
   const bd = $('#bdetail');
   if (sel) bd.innerHTML = `<div><span>Hoogte</span><code>${sel.h}${sel === head ? ' (head)' : ''}</code></div><div><span>Blok-hash</span><code>${sel.hash}</code></div><div><span>Vorige hash</span><code>${sel.prev}</code></div><div><span>Merkle-root (tokens)</span><code>${sel.merkle}</code></div>
     <div><span>Gescand / opgenomen</span><code>${sel.total} / ${sel.snap.length}</code></div><div><span>Tijd · nonce</span><code>${new Date(sel.ts).toLocaleString('nl-NL')} · ${sel.nonce}</code></div>
+    <div><span>Bronnen (tokens)</span><code>${Object.entries(sel.srcCount || {}).map(([k, v]) => `${(SRC_LABEL[k] || k).toLowerCase()} ${v}`).join(' · ') || '–'}</code></div>
     <div><span>Integriteit</span><code id="verify-out"><button class="btn sm" data-act="verify">Controleer keten</button></code></div>`;
   else bd.innerHTML = '<div class="note">Eerste blok wordt gemined zodra de scan klaar is.</div>';
   // tokens
   const q = S.ui.q.trim().toLowerCase();
-  let rows = (sel?.snap || []).map(t => ({t, ev: evaluate(t)}));
+  const sf = S.ui.src, hasSrc = t => !sf || (t.src || []).some(x => x === sf || (sf === 'boost' && x === 'topboost'));
+  let rows = (sel?.snap || []).filter(hasSrc).map(t => ({t, ev: evaluate(t)}));
   const nPass = rows.filter(r => r.ev.pass).length, nAll = rows.length;
   const view = S.ui.view || 'beide';
   $('#netbox').hidden = view === 'kaarten'; $('#grid').hidden = $('#count').hidden = view === 'netwerk';
@@ -1369,6 +1397,12 @@ function renderSettings() {
     </div><p class="note">De auto-trader koopt alleen tokens die alle filters halen en niet eerder zijn verhandeld. Een token met honeypot-uitslag wordt nooit gekocht.</p></div>
     <div class="panel"><h2>Standaard exit-regels</h2><div class="fgrid">${num('t-tp', 'Take profit (%)', t.tp, 5, '0 = uit')}${num('t-sl', 'Stop loss (%)', t.sl, 5, '0 = uit')}${num('t-trail', 'Trailing stop (%)', t.trail, 5, '0 = uit')}${num('t-size', 'Standaard handmatig bedrag ($)', t.size, 25)}</div></div></div>
     <div class="two"><div class="panel"><h2>Scanner</h2><div class="fgrid">${num('s-scan', 'Scan-interval (sec)', s.scanSec, 10)}${num('s-ref', 'Koers tokenlijst verversen (sec)', s.refreshSec, 5)}${num('s-posref', 'Koers open posities verversen (sec)', s.posRefreshSec, 1, 'Kleiner = sneller PnL en stop loss. DexScreener staat ruim 300 verzoeken per minuut toe.')}${num('s-sec', 'Beveiligingschecks per scan', s.secPerScan, 1)}
+      <div class="fld wide"><label>Tokenbronnen</label></div>
+      <label class="chk"><input type="checkbox" id="src-profiles" ${s.sources.profiles ? 'checked' : ''}> DexScreener-profielen</label>
+      <label class="chk"><input type="checkbox" id="src-boosts" ${s.sources.boosts ? 'checked' : ''}> DexScreener-boosts (betaalde promotie)</label>
+      <label class="chk"><input type="checkbox" id="src-new" ${s.sources.newPools ? 'checked' : ''}> Nieuwe pools (GeckoTerminal)</label>
+      <label class="chk"><input type="checkbox" id="src-trend" ${s.sources.trending ? 'checked' : ''}> Trending pools (GeckoTerminal)</label>
+      <div class="fld wide"><span class="note">GeckoTerminal staat 30 verzoeken per minuut toe. Een scan gebruikt er ongeveer 9.</span></div>
       <div class="fld wide"><label for="s-query">Extra zoekterm op DexScreener (optioneel)</label><input type="text" id="s-query" value="${esc(s.query)}" placeholder="bijv. pump, base, AI"></div>
       <div class="fld wide"><label for="s-watch">Watchlist (één per regel: keten:tokenadres)</label><textarea id="s-watch" placeholder="solana:So1111…&#10;base:0x4200…">${esc(s.watch.map(w => w.chain + ':' + w.addr).join('\n'))}</textarea></div></div></div>
     <div class="panel"><h2>Portfolio</h2><div class="fgrid">${num('s-cash', 'Startkapitaal ($)', s.startCash, 1000)}</div>
@@ -1380,7 +1414,8 @@ function renderSettings() {
   bind('a-size', e => a.size = +e.value || 0); bind('a-max', e => a.max = +e.value || 0);
   bind('t-tp', e => t.tp = +e.value || 0); bind('t-sl', e => t.sl = +e.value || 0); bind('t-trail', e => t.trail = +e.value || 0); bind('t-size', e => t.size = +e.value || 0);
   bind('s-scan', e => s.scanSec = clamp(+e.value || 90, 20, 3600)); bind('s-ref', e => s.refreshSec = clamp(+e.value || 20, 5, 600)); bind('s-posref', e => { s.posRefreshSec = clamp(+e.value || 4, 2, 120); }); bind('s-sec', e => s.secPerScan = clamp(+e.value || 0, 0, 40));
-  bind('s-query', e => s.query = e.value); bind('s-cash', e => s.startCash = Math.max(100, +e.value || 10000));
+  bind('s-query', e => s.query = e.value);
+  bind('src-profiles', e => s.sources.profiles = e.checked); bind('src-boosts', e => s.sources.boosts = e.checked); bind('src-new', e => s.sources.newPools = e.checked); bind('src-trend', e => s.sources.trending = e.checked); bind('s-cash', e => s.startCash = Math.max(100, +e.value || 10000));
   bind('s-watch', e => s.watch = e.value.split('\n').map(l => l.trim()).filter(l => l.includes(':')).map(l => { const i = l.indexOf(':'); return {chain: l.slice(0, i).trim().toLowerCase(), addr: l.slice(i + 1).trim()}; }).filter(w => w.addr));
 }
 
@@ -1394,6 +1429,7 @@ function renderDrawer() {
   root.innerHTML = `<div class="scrim" data-act="close"></div><aside class="drawer" role="dialog" aria-label="${esc(t.sym)} details">
     <div class="d-head">${iconHtml(t)}<div><h2>${esc(t.sym)} <small class="mute" style="font:12px var(--f-body)">${esc(t.name)}</small></h2><div class="mono mute" style="font-size:11px">${chainBadge(t.chain)} ${esc(t.dex)} · ${esc(shortA(t.addr))} <button class="btn sm" data-act="copy" data-v="${esc(t.addr)}">kopieer</button></div></div>${ring(ev.score)}<button class="btn sm x" data-act="close" aria-label="Sluiten">Sluit</button></div>
     <div class="c-price"><b id="d-price" style="font:600 22px var(--f-mono)">${px(t.price)}</b><span id="d-ch">${pct(t.c1)} 1u · ${pct(t.c24, 0)} 24u</span></div>
+    ${(t.src || []).length ? `<div class="pills"><span class="note">Gevonden via</span>${t.src.map(x => `<span class="srcchip">${SRC_LABEL[x] || esc(x)}</span>`).join('')}</div>` : ''}
     <div class="kv" style="grid-template-columns:repeat(3,1fr)"><div><span>Liquiditeit</span><b>${usd(t.liq)}</b></div><div><span>Volume 24u</span><b>${usd(t.v24)}</b></div><div><span>MCap</span><b>${usd(t.mcap)}</b></div><div><span>Leeftijd</span><b>${ageStr(ageH)}</b></div><div><span>Kopen/verkopen</span><b>${t.b24}/${t.s24}</b></div><div><span>Holders</span><b>${r.metrics.holders ? r.metrics.holders.toLocaleString('nl-NL') : '–'}</b></div></div>
     <div class="d-sec"><h3>Honeypot- en rugcheck</h3><div class="pills">${verdictPill(r)}${ev.pass ? '<span class="pill ok">Gevalideerd</span>' : '<span class="pill unk">Afgekeurd</span>'}<button class="btn sm" data-act="recheck" data-k="${esc(key)}">Opnieuw checken</button></div>
       <ul class="risk">${r.items.length ? r.items.map(i => `<li class="${i.l}">${esc(i.t)}</li>`).join('') : '<li>Nog geen check uitgevoerd. Klik op Opnieuw checken.</li>'}</ul>
@@ -1499,6 +1535,7 @@ document.addEventListener('input', e => {
 });
 $('#q').addEventListener('input', e => { S.ui.q = e.target.value; render(); });
 $('#sort').addEventListener('change', e => { S.ui.sort = e.target.value; render(); saveSoon(); });
+$('#srcsel').addEventListener('change', e => { S.ui.src = e.target.value; render(); saveSoon(); });
 $('#onlypass').addEventListener('change', e => { S.ui.onlyPass = e.target.checked; render(); saveSoon(); });
 $('#autoscan').addEventListener('change', e => { S.settings.autoScan = e.target.checked; if (e.target.checked) nextScanAt = Date.now() + 2000; updateTop(); saveSoon(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.ui.drawer) { S.ui.drawer = null; renderDrawer(); } });
@@ -1511,7 +1548,7 @@ async function switchMode(mode, fallback = false) {
   scan();
 }
 function syncControls() {
-  $('#sort').value = S.ui.sort; $('#onlypass').checked = S.ui.onlyPass; $('#autoscan').checked = S.settings.autoScan; $('#q').value = S.ui.q;
+  $('#sort').value = S.ui.sort; $('#srcsel').value = S.ui.src || ''; $('#onlypass').checked = S.ui.onlyPass; $('#autoscan').checked = S.settings.autoScan; $('#q').value = S.ui.q;
 }
 function tick() {
   const now = Date.now();
