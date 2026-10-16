@@ -1018,12 +1018,14 @@ const Amb = (() => {
 
 const Net = (() => {
   const cv = $('#net'), tip = $('#net-tip'), hub = {x: 0, y: 0};
-  let ctx, W = 0, H = 0, dpr = 1, nodes = [], edges = [], edgeAt = 0, pulseV = 0, hover = null, block = null, lastSig = '';
+  let ctx, W = 0, H = 0, dpr = 1, nodes = [], edges = [], edgeAt = 0, pulseV = 0, hover = null, block = null, mouse = null, lastPulse = 0, dust = [];
   function resize() {
     const r = cv.getBoundingClientRect(); if (!r.width || !r.height) return false;
     if (r.width === W && r.height === H && ctx) return true;
     dpr = Math.min(2, devicePixelRatio || 1); W = r.width; H = r.height; cv.width = W * dpr; cv.height = H * dpr;
-    ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); hub.x = W / 2; hub.y = H / 2; return true;
+    ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); hub.x = W / 2; hub.y = H / 2;
+    dust = Array.from({length: 40}, () => ({x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - .5) * .3, vy: (Math.random() - .5) * .3, r: .6 + Math.random() * 1.4, ph: Math.random() * 6.28}));
+    return true;
   }
   const seedOf = str => { let h = 7; for (const ch of str) h = (h * 33 + ch.charCodeAt(0)) >>> 0; return h; };
   function set(rows, blk) {
@@ -1031,7 +1033,7 @@ const Net = (() => {
     const prev = new Map(nodes.map(n => [n.key, n])), isNew = !block || !blk || block.h !== blk.h; block = blk;
     nodes = rows.map((r, i) => {
       const t = r.t, e = r.ev, old = prev.get(t.key), sd = seedOf(t.key);
-      const n = old || {key: t.key, ph: (sd % 628) / 100, x: hub.x + Math.cos(i * 2.4 + sd) * W * .08, y: hub.y + Math.sin(i * 2.4 + sd) * H * .08, vx: 0, vy: 0};
+      const n = old || {key: t.key, ph: (sd % 628) / 100, x: hub.x + Math.cos(i * 2.4 + sd) * W * .08, y: hub.y + Math.sin(i * 2.4 + sd) * H * .08, vx: 0, vy: 0, born: performance.now(), dir: sd % 2 ? 1 : -1};
       n.t = t; n.ev = e; n.pass = e.pass; n.verdict = e.risk.verdict; n.hp = !!e.risk.metrics.honeypot;
       n.r = 4 + 10 * clamp(Math.log10(Math.max(t.liq, 1) / 3000) / Math.log10(400000 / 3000), 0, 1);
       const sc = e.score / 100, j = (sd % 100) / 100;
@@ -1050,12 +1052,19 @@ const Net = (() => {
     const byKey = new Map(nodes.map(n => [n.key, n]));
     edges = [...out].map(k => k.split('|')).map(([a, b]) => [byKey.get(a), byKey.get(b)]).filter(e => e[0] && e[1]);
   }
-  function step() {
-    const ax = W * .45, ay = H * .44;
+  function step(t) {
+    const ax = W * .45, ay = H * .44, mv = reduceMotion ? 0 : 1;
     for (const n of nodes) {
       const dx = n.x - hub.x, dy = n.y - hub.y, dist = Math.hypot(dx, dy) || .01, d = Math.hypot(dx / ax, dy / ay) || .01;
-      const f = (n.rho - d) * .02 * Math.max(ax, ay);
+      const rho = n.rho + Math.sin(t * .35 + n.ph * 2) * .04 * mv;
+      const f = (rho - d) * .02 * Math.max(ax, ay);
       n.vx += dx / dist * f; n.vy += dy / dist * f;
+      const a = (n.pass ? .06 : .03) * (n.pass ? 1 : n.dir) * mv;
+      n.vx += -dy / dist * a; n.vy += dx / dist * a;
+      if (mouse && mv) {
+        const mx = n.x - mouse.x, my = n.y - mouse.y, md = Math.hypot(mx, my);
+        if (md < 140) { const k = (140 - md) / 140 * 1.1; n.vx += mx / (md || 1) * k; n.vy += my / (md || 1) * k; }
+      }
       if (dist < 70) { n.vx += dx / dist * (70 - dist) * .05; n.vy += dy / dist * (70 - dist) * .05; }
     }
     for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
@@ -1068,35 +1077,56 @@ const Net = (() => {
   function frame(ts) {
     requestAnimationFrame(frame);
     if (document.hidden || !cv.offsetParent || !resize()) return;
-    step(); if (!edgeAt || ts - edgeAt > 1500) { buildEdges(); edgeAt = ts; }
-    const t = ts / 1000, mv = reduceMotion ? 0 : 1, ac = Theme.get('--accent'), good = Theme.get('--good'), bad = Theme.get('--bad'), fg = Theme.get('--fg'), warn = Theme.get('--warn');
+    const t = ts / 1000; step(t); if (!edgeAt || ts - edgeAt > 1500) { buildEdges(); edgeAt = ts; }
+    const mv = reduceMotion ? 0 : 1, ac = Theme.get('--accent'), good = Theme.get('--good'), bad = Theme.get('--bad'), fg = Theme.get('--fg'), warn = Theme.get('--warn');
     ctx.clearRect(0, 0, W, H);
-    for (const n of nodes) { n.px = n.x + Math.sin(t * .45 + n.ph) * 3.5 * mv; n.py = n.y + Math.cos(t * .38 + n.ph * 1.3) * 3.5 * mv; }
+    if (mv && ts - lastPulse > 3800) { lastPulse = ts; pulseV = Math.max(pulseV, .6); }
+    for (const d of dust) {
+      if (mv) { d.x += d.vx; d.y += d.vy; if (d.x < 0) d.x = W; if (d.x > W) d.x = 0; if (d.y < 0) d.y = H; if (d.y > H) d.y = 0; }
+      ctx.fillStyle = rgba(ac, mv ? .25 + .25 * Math.sin(t * 1.3 + d.ph) : .3); ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, 6.283); ctx.fill();
+    }
+    for (const n of nodes) {
+      n.px = n.x + (Math.sin(t * .5 + n.ph) * 8 + Math.sin(t * 1.2 + n.ph * 3) * 2.5) * mv;
+      n.py = n.y + (Math.cos(t * .42 + n.ph * 1.3) * 8 + Math.cos(t * 1.1 + n.ph * 2) * 2.5) * mv;
+      const k = clamp((ts - n.born) / 800, 0, 1), grow = 1 - Math.pow(1 - k, 3);
+      n.rr = n.r * (mv ? grow * (1 + .07 * Math.sin(t * 2.1 + n.ph)) : 1);
+    }
+    const packet = (a, b, p, col, al, w) => {
+      const q = Math.max(0, p - .09), x1 = a.px + (b.px - a.px) * q, y1 = a.py + (b.py - a.py) * q, x2 = a.px + (b.px - a.px) * p, y2 = a.py + (b.py - a.py) * p;
+      ctx.strokeStyle = rgba(col, al * .55); ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.fillStyle = rgba(col, al); ctx.beginPath(); ctx.arc(x2, y2, w + .6, 0, 6.283); ctx.fill();
+    };
+    const hubNode = {px: hub.x, py: hub.y};
     ctx.lineWidth = 1;
     for (const [a, b] of edges) {
       const strong = a.pass && b.pass; ctx.strokeStyle = rgba(strong ? good : ac, strong ? .4 : .15);
       ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      if (mv) { const sd = (a.ph + b.ph) % 1; packet(a, b, (t * (.12 + sd * .1) + sd * 3) % 1, strong ? good : ac, strong ? .8 : .4, 1.1); }
     }
     for (const n of nodes) {
       ctx.strokeStyle = rgba(n.pass ? good : ac, n.pass ? .55 : .1); ctx.lineWidth = n.pass ? 1.2 : 1;
       ctx.beginPath(); ctx.moveTo(hub.x, hub.y); ctx.lineTo(n.px, n.py); ctx.stroke();
-      if (n.pass && mv) {
-        const p = (t / (3.2 + n.ph % 2) + n.ph) % 1, x = hub.x + (n.px - hub.x) * p, y = hub.y + (n.py - hub.y) * p;
-        ctx.fillStyle = rgba(good, .95); ctx.beginPath(); ctx.arc(x, y, 2, 0, 6.283); ctx.fill();
+      if (mv) {
+        const sp = 3 + (n.ph % 2), dir = n.dir;
+        for (let i = 0; i < (n.pass ? 2 : 1); i++) {
+          let p = (t / sp + n.ph + i * .5) % 1; if (dir < 0 && n.pass) p = 1 - p;
+          const a = dir < 0 && n.pass ? n : hubNode, b = dir < 0 && n.pass ? hubNode : n;
+          packet(a, b, dir < 0 && n.pass ? 1 - p : p, n.pass ? good : ac, n.pass ? .95 : .4, n.pass ? 1.6 : 1);
+        }
       }
     }
     const open = S.ui.drawer;
     for (const n of nodes) {
       const col = n.hp || n.verdict === 'bad' ? bad : n.pass ? good : ac, glow = n.pass ? 4.6 : 3.2, far = !n.pass;
-      const g = ctx.createRadialGradient(n.px, n.py, 0, n.px, n.py, n.r * glow);
+      const g = ctx.createRadialGradient(n.px, n.py, 0, n.px, n.py, n.rr * glow);
       g.addColorStop(0, rgba(col, n.pass ? .5 : .2)); g.addColorStop(1, rgba(col, 0));
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.px, n.py, n.r * glow, 0, 6.283); ctx.fill();
-      ctx.fillStyle = rgba(col, far ? .6 : 1); ctx.beginPath(); ctx.arc(n.px, n.py, n.r, 0, 6.283); ctx.fill();
-      ctx.fillStyle = rgba([255, 255, 255], far ? .5 : .85); ctx.beginPath(); ctx.arc(n.px - n.r * .22, n.py - n.r * .22, n.r * .32, 0, 6.283); ctx.fill();
-      if (hover === n || open === n.key) { ctx.strokeStyle = rgba(col, .95); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(n.px, n.py, n.r + 5, 0, 6.283); ctx.stroke(); }
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.px, n.py, n.rr * glow, 0, 6.283); ctx.fill();
+      ctx.fillStyle = rgba(col, far ? .6 : 1); ctx.beginPath(); ctx.arc(n.px, n.py, n.rr, 0, 6.283); ctx.fill();
+      ctx.fillStyle = rgba([255, 255, 255], far ? .5 : .85); ctx.beginPath(); ctx.arc(n.px - n.rr * .22, n.py - n.rr * .22, n.rr * .32, 0, 6.283); ctx.fill();
+      if (hover === n || open === n.key) { ctx.strokeStyle = rgba(col, .95); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(n.px, n.py, n.rr + 5, 0, 6.283); ctx.stroke(); }
       if (n.pass || hover === n || (n.verdict === 'warn' && n.pass)) {
         ctx.font = '600 11px JetBrains Mono, ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillStyle = rgba(fg, .92);
-        ctx.fillText(n.t.sym, n.px, n.py - n.r - 8);
+        ctx.fillText(n.t.sym, n.px, n.py - n.rr - 8);
       }
     }
     // het blok in het midden
@@ -1120,13 +1150,13 @@ const Net = (() => {
     return {n: best, x, y};
   }
   cv.addEventListener('pointermove', ev => {
-    const {n, x, y} = pick(ev); hover = n; cv.style.cursor = n ? 'pointer' : 'default';
+    const {n, x, y} = pick(ev); hover = n; mouse = {x, y}; cv.style.cursor = n ? 'pointer' : 'default';
     if (!n) { tip.hidden = true; return; }
     const t = n.t; tip.hidden = false;
     tip.innerHTML = `<b>${esc(t.sym)}</b>${esc(t.chain)} · score ${n.ev.score}<br>Liq ${usd(t.liq)} · 1u ${pct(t.c1)}<br>${n.pass ? 'Gevalideerd' : 'Afgekeurd'} · ${n.hp ? 'honeypot' : {ok: 'veilig', warn: 'let op', bad: 'gevaar', unknown: 'niet gecheckt'}[n.verdict]}`;
     tip.style.left = Math.min(x + 14, W - 190) + 'px'; tip.style.top = Math.max(4, y - 10) + 'px';
   });
-  cv.addEventListener('pointerleave', () => { hover = null; tip.hidden = true; });
+  cv.addEventListener('pointerleave', () => { hover = null; mouse = null; tip.hidden = true; });
   cv.addEventListener('click', ev => { const {n} = pick(ev); if (n) openToken(n.key); });
   addEventListener('resize', () => { W = 0; });
   requestAnimationFrame(frame);
