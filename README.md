@@ -14,6 +14,7 @@ De browser haalt data rechtstreeks op bij DexScreener, honeypot.is, GoPlus en Ru
 
 ## Wat het doet
 
+- **Tokennetwerk.** Elk token is een lichtgevend knooppunt rond het gekozen blok. Gevalideerde tokens zitten dichtbij het blok met bewegende transactiepuntjes, afgekeurde zweven verder weg. Grootte is liquiditeit. Klik op een knooppunt voor details. Op de achtergrond drijft een plexus van knooppunten in twee lagen.
 - **Keten van scans.** Elke scan wordt een blok met hash, vorige hash, Merkle-root van de tokens en een kleine proof-of-work. Klik op een blok om de tokens (transacties) erin te zien. "Controleer keten" herberekent alle hashes.
 - **Filters.** Liquiditeit, volume, transacties, leeftijd, marktcap, koersmomentum, koop/verkoop-balans, liq/mcap, wash-trading, socials, tax, grootste holder, LP-lock, mint en owner-risico. Presets: Veilig, Gebalanceerd, Degen. Elk token krijgt een score van 0 tot 100.
 - **Honeypot- en rugcheck.**
