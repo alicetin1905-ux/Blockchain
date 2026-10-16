@@ -169,6 +169,16 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .since{font:11px var(--f-mono);color:var(--mute)}
 .empty{padding:36px 16px;text-align:center;color:var(--mute);border:1px dashed var(--line);border-radius:10px}
 
+/* open posities, altijd zichtbaar */
+.posbar{margin-top:12px;background:var(--panel);border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line));border-radius:10px;padding:10px 12px;display:grid;gap:8px;backdrop-filter:blur(8px)}
+.pb-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.pb-h b{font:700 13px var(--f-head);letter-spacing:.06em;text-transform:uppercase}
+.pb-h .btn{margin-left:auto}
+.pb-list{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.pb-i{flex:0 0 auto;display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:13px}
+.pb-s{background:none;border:0;padding:0;text-align:left}
+.pb-s:hover b{color:var(--accent)}
+
 /* tokennetwerk */
 .netbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:14px}
 .netbox-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap}
@@ -276,6 +286,7 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
 
   <main class="wrap">
     <div id="banner"></div>
+    <section id="posbar" class="posbar" aria-label="Open posities" hidden></section>
     <section id="v-scanner" class="scan">
       <aside class="filters" id="filters" aria-label="Filters"></aside>
       <div style="min-width:0">
@@ -1166,6 +1177,25 @@ function queueVisibleSec() {
   if (need.length) runSec(need);
 }
 
+/* ---------- UI: open posities ---------- */
+function renderPosBar() {
+  const el = $('#posbar'), pos = S.pf.pos;
+  if (!pos.length || S.ui.tab === 'portfolio') { el.hidden = true; return; }
+  el.hidden = false;
+  const tot = pos.reduce((a, p) => a + p.qty * p.last - p.cost, 0), armed = S.ui.armAll && Date.now() - S.ui.armAll < 4000;
+  el.innerHTML = `<div class="pb-h"><b>Open posities (${pos.length})</b><span class="num ${tot >= 0 ? 'up' : 'dn'}">${tot >= 0 ? '+' : ''}${money(tot)}</span>
+    <button class="btn sm bad" data-act="sellall">${armed ? 'Zeker weten? Klik nogmaals' : 'Verkoop alles'}</button></div>
+    <div class="pb-list">${pos.map(p => { const v = p.qty * p.last, r = (v / p.cost - 1) * 100;
+      return `<div class="pb-i"><button class="pb-s" data-act="open" data-k="${esc(p.key)}" title="Details"><b>${esc(p.sym)}</b> ${chainBadge(p.chain)}</button><span class="mono num">${money(v)}</span>${pct(r)}
+        <button class="btn sm" data-act="sell" data-id="${p.id}" data-f="0.5">50%</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-f="1">Verkoop</button></div>`; }).join('')}</div>`;
+}
+async function sellAll() {
+  const list = [...S.pf.pos]; let total = 0, n = 0;
+  for (const p of list) { const r = await doSell(p.id, 1, 'Alles verkopen'); if (r.ok) { total += r.pnl; n++; } }
+  toast(`${n} posities verkocht (papier): ${total >= 0 ? '+' : ''}${money(total)}`, total >= 0 ? 'good' : 'bad');
+  if (S.ui.drawer) renderDrawer(); render();
+}
+
 /* ---------- UI: scanner ---------- */
 const selectedBlock = () => S.ui.sel == null ? S.blocks.at(-1) : S.blocks.find(b => b.h === S.ui.sel) || S.blocks.at(-1);
 function ring(score) {
@@ -1190,7 +1220,7 @@ function cardHtml(t, ev, head) {
     <div class="pills">${ev.pass ? '<span class="pill ok">Gevalideerd</span>' : '<span class="pill unk">Afgekeurd</span>'}${verdictPill(ev.risk)}${held ? '<span class="pill ok">In bezit</span>' : ''}</div>
     ${!ev.pass ? `<div class="fails">${ev.fails.slice(0, 3).map(x => `<span>${esc(x)}</span>`).join('')}${ev.fails.length > 3 ? `<span>+${ev.fails.length - 3}</span>` : ''}</div>` : ''}
     ${since != null && !head ? `<div class="since">Sinds dit blok: ${pct(since)}</div>` : ''}
-    <div class="c-act"><button class="btn sm" data-act="check" data-k="${esc(t.key)}">Check</button><button class="btn sm" data-act="open" data-k="${esc(t.key)}">Details</button><button class="btn sm good" data-act="open" data-k="${esc(t.key)}">Koop</button></div>
+    <div class="c-act"><button class="btn sm" data-act="check" data-k="${esc(t.key)}">Check</button><button class="btn sm" data-act="open" data-k="${esc(t.key)}">Details</button>${held ? `<button class="btn sm bad" data-act="sell" data-id="${S.pf.pos.find(p => p.key === t.key).id}" data-f="1">Verkoop alles</button>` : `<button class="btn sm good" data-act="open" data-k="${esc(t.key)}">Koop</button>`}</div>
   </article>`;
 }
 function renderScanner() {
@@ -1339,6 +1369,7 @@ function renderNow() {
   $$('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.v === tab));
   if (tab === 'scanner') { renderScanner(); renderChainChips(); }
   if (tab === 'portfolio') renderPortfolio();
+  renderPosBar();
 }
 function toast(msg, kind = '') {
   const el = document.createElement('div'); el.className = 'toast ' + kind; el.textContent = msg; $('#toasts').append(el);
@@ -1366,6 +1397,10 @@ document.addEventListener('click', async e => {
       S.preset = ''; renderChainChips(); filterChanged(); break;
     }
     case 'open': openToken(d.k); break;
+    case 'sellall':
+      if (S.ui.armAll && Date.now() - S.ui.armAll < 4000) { S.ui.armAll = 0; await sellAll(); }
+      else { S.ui.armAll = Date.now(); renderPosBar(); setTimeout(renderPosBar, 4100); }
+      break;
     case 'view': S.ui.view = d.v; render(); saveSoon(); break;
     case 'close': S.ui.drawer = null; renderDrawer(); break;
     case 'check': { const t = S.tokens[d.k] || findToken(d.k); if (t) { delete S.sec[d.k]; toast(`Check gestart voor ${t.sym}…`); await runSec([t], 1); } break; }
