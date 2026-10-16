@@ -174,8 +174,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .pb-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .pb-h b{font:700 13px var(--f-head);letter-spacing:.06em;text-transform:uppercase}
 .pb-h .btn{margin-left:auto}
-.pb-list{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
-.pb-i{flex:0 0 auto;display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:13px}
+.pb-list{display:flex;flex-direction:column;gap:6px;max-height:42vh;overflow-y:auto}
+.pb-i{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}
+.pb-i .pb-btns{margin-left:auto;display:flex;gap:6px}
 .pb-s{background:none;border:0;padding:0;text-align:left}
 .pb-s:hover b{color:var(--accent)}
 
@@ -285,8 +286,8 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
   </div></header>
 
   <main class="wrap">
-    <div id="banner"></div>
     <section id="posbar" class="posbar" aria-label="Open posities" hidden></section>
+    <div id="banner"></div>
     <section id="v-scanner" class="scan">
       <aside class="filters" id="filters" aria-label="Filters"></aside>
       <div style="min-width:0">
@@ -1187,7 +1188,7 @@ function renderPosBar() {
     <button class="btn sm bad" data-act="sellall">${armed ? 'Zeker weten? Klik nogmaals' : 'Verkoop alles'}</button></div>
     <div class="pb-list">${pos.map(p => { const v = p.qty * p.last, r = (v / p.cost - 1) * 100;
       return `<div class="pb-i"><button class="pb-s" data-act="open" data-k="${esc(p.key)}" title="Details"><b>${esc(p.sym)}</b> ${chainBadge(p.chain)}</button><span class="mono num">${money(v)}</span>${pct(r)}
-        <button class="btn sm" data-act="sell" data-id="${p.id}" data-f="0.5">50%</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-f="1">Verkoop</button></div>`; }).join('')}</div>`;
+        <div class="pb-btns"><button class="btn sm" data-act="sell" data-id="${p.id}" data-f="0.5">50%</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-f="1">Verkoop</button></div></div>`; }).join('')}</div>`;
 }
 async function sellAll() {
   const list = [...S.pf.pos]; let total = 0, n = 0;
