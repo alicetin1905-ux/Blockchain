@@ -59,6 +59,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .brand{display:flex;align-items:center;gap:10px;font-family:var(--f-head);font-weight:700;font-size:20px;letter-spacing:.04em}
 .brand svg{width:26px;height:26px}
 .brand small{font:500 11px var(--f-mono);color:var(--mute);letter-spacing:0;margin-left:2px}
+.paper{font:700 10px var(--f-mono);letter-spacing:.12em;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 60%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent);border-radius:4px;padding:3px 8px;white-space:nowrap}
 .status{display:flex;align-items:center;gap:8px;font:12px var(--f-mono);color:var(--mute)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 22%,transparent)}
 .dot.busy{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent);animation:pulse 1s infinite}
@@ -255,6 +256,7 @@ iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:
         <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="2" y="9" width="10" height="10" rx="2" stroke="var(--accent)" stroke-width="2"/><rect x="16" y="9" width="10" height="10" rx="2" stroke="var(--accent)" stroke-width="2"/><path d="M12 14h4" stroke="var(--accent)" stroke-width="2"/></svg>
         <span>CHAINSCOUT</span><small>paper</small>
       </div>
+      <span class="paper" title="Alle trades zijn gesimuleerd. Er is geen wallet gekoppeld en er wordt niets echts gekocht.">PAPER TRADING</span>
       <div class="status" id="status" aria-live="polite"></div>
       <div class="seg" role="group" aria-label="Databron">
         <button id="m-live" data-act="mode" data-v="live" aria-pressed="true">LIVE</button>
@@ -828,7 +830,7 @@ async function doBuy(key, amount, o = {}) {
   }
   await ledgerAdd({type: 'buy', key, sym: t.sym, chain: t.chain, usd: amount, qty: q.qty, price: q.exec, fee: q.fee, impact: q.impact, auto: !!o.auto});
   saveSoon();
-  return {ok: true, msg: `Gekocht: ${t.sym} voor ${money(amount)} (impact ${(q.impact * 100).toFixed(2)}%)`};
+  return {ok: true, msg: `Papier-trade, gekocht: ${t.sym} voor ${money(amount)} (impact ${(q.impact * 100).toFixed(2)}%)`};
 }
 async function doSell(posId, frac, reason = 'Handmatig') {
   const p = S.pf.pos.find(x => x.id === posId); if (!p) return {ok: false, msg: 'Positie niet gevonden'};
@@ -841,7 +843,7 @@ async function doSell(posId, frac, reason = 'Handmatig') {
   if (frac >= 0.999) S.pf.pos = S.pf.pos.filter(x => x.id !== posId);
   else { p.qty -= q.qty; p.cost -= costPart; }
   saveSoon();
-  return {ok: true, msg: `Verkocht: ${p.sym} ${Math.round(frac * 100)}% voor ${money(q.net)} (${pnl >= 0 ? '+' : ''}${money(pnl)})`, pnl};
+  return {ok: true, msg: `Papier-trade, verkocht: ${p.sym} ${Math.round(frac * 100)}% voor ${money(q.net)} (${pnl >= 0 ? '+' : ''}${money(pnl)})`, pnl};
 }
 async function markPortfolio() {
   for (const p of [...S.pf.pos]) {
@@ -1125,7 +1127,7 @@ function updateTop() {
   const live = S.mode === 'live';
   if (S.scanning) $('#status').innerHTML = `<span class="dot busy"></span>Scannen…`;
   else if (lastScanInfo) $('#status').innerHTML = `<span class="dot off"></span>${esc(lastScanInfo)}`;
-  else $('#status').innerHTML = `<span class="dot ${S.settings.autoScan ? '' : 'off'}"></span>${live ? 'Live' : 'Demo'} · ${S.blocks.length ? 'blok #' + S.blocks.at(-1).h : 'nog geen blok'} · ${S.settings.autoScan ? 'volgende in ' + left + 's' : 'auto-scan uit'}`;
+  else $('#status').innerHTML = `<span class="dot ${S.settings.autoScan ? '' : 'off'}"></span>${live ? 'Live koersen' : 'Demo-markt'} · ${S.blocks.length ? 'blok #' + S.blocks.at(-1).h : 'nog geen blok'} · ${S.settings.autoScan ? 'volgende in ' + left + 's' : 'auto-scan uit'}`;
   const pend = $('#pend-bar'); if (pend) pend.style.width = (S.scanning ? 100 : clamp(100 - left / S.settings.scanSec * 100, 0, 100)) + '%';
   const pl = $('#pend-left'); if (pl) pl.textContent = S.scanning ? 'minen…' : S.settings.autoScan ? left + 's' : 'gepauzeerd';
   const eq = equity(), pnl = eq - S.pf.start;
@@ -1305,7 +1307,7 @@ function renderDrawer() {
       <div class="amts">${[100, 250, 500, 1000].map(v => `<button class="btn sm" data-act="amt" data-v="${v}">$${v}</button>`).join('')}<button class="btn sm" data-act="amt" data-v="max">Max</button></div>
       <div class="fgrid"><div class="fld"><label for="t-amt">Bedrag ($)</label><input type="number" id="t-amt" value="${Math.min(tr.size, Math.floor(S.pf.cash))}" min="0" step="25"></div><div class="fld"><label for="x-tp">Take profit (%)</label><input type="number" id="x-tp" value="${tr.tp}"></div><div class="fld"><label for="x-sl">Stop loss (%)</label><input type="number" id="x-sl" value="${tr.sl}"></div><div class="fld"><label for="x-trail">Trailing stop (%)</label><input type="number" id="x-trail" value="${tr.trail}"></div></div>
       <div class="q" id="d-quote"></div>
-      <button class="btn good" id="d-buy" data-act="buy" data-k="${esc(key)}">Koop</button>
+      <button class="btn good" id="d-buy" data-act="buy" data-k="${esc(key)}">Koop met papiergeld</button>
       <div class="note" id="d-msg"></div></div>
     <div class="d-sec"><h3>Grafiek</h3>${S.ui.chart && t.pair ? `<iframe class="chart" title="DexScreener grafiek" src="https://dexscreener.com/${encodeURIComponent(t.chain)}/${encodeURIComponent(t.pair)}?embed=1&theme=dark&trades=0&info=0"></iframe>` : '<button class="btn sm" data-act="chart">Toon grafiek</button>'}
       ${t.url ? `<a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" class="note">Open op DexScreener</a>` : ''}</div>
