@@ -22,7 +22,7 @@ De browser haalt data rechtstreeks op bij DexScreener, honeypot.is, GoPlus en Ru
   - Solana: GoPlus (mint, freeze, transfer fee, holders) plus RugCheck.
   - Altijd: markt-heuristieken op DexScreener-data, zoals geen verkopen, liquiditeit die verdwijnt, dump of pump, wash trading en extreem dunne pools.
   - Andere ketens krijgen alleen de markt-heuristieken.
-- **Paper trading.** Startkapitaal $10.000. Prijsimpact volgt uit de pool-liquiditeit, daarbij komen 0,3% swapfee, gas en de gemeten buy/sell tax. Take profit, stop loss, trailing stop en een rug-alarm dat uitstapt als de liquiditeit wegvalt. Optioneel een auto-trader die alleen gevalideerde tokens koopt. Honeypots worden altijd geblokkeerd.
+- **Paper trading.** Startkapitaal $10.000. Prijsimpact volgt uit de pool-liquiditeit, daarbij komen 0,3% swapfee, gas en de gemeten buy/sell tax. De koersen van open posities verversen elke 4 seconden (instelbaar bij Instellingen), met resultaat in procenten en dollars. Take profit, stop loss, trailing stop en een rug-alarm dat uitstapt als de liquiditeit wegvalt, controleren in hetzelfde ritme. Optioneel een auto-trader die alleen gevalideerde tokens koopt. Honeypots worden altijd geblokkeerd.
 - **Grootboek.** Elke trade is een blok in een eigen hash-keten.
 
 ## Let op

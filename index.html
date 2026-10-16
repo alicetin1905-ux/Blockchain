@@ -180,6 +180,12 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .pb-i .pb-btns{margin-left:auto;display:flex;gap:6px}
 .pb-s{background:none;border:0;padding:0;text-align:left}
 .pb-s:hover b{color:var(--accent)}
+.pb-age{font:11px var(--f-mono);color:var(--mute);display:inline-flex;gap:6px;align-items:center}
+.pb-age::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--good);animation:pulse 1.6s infinite}
+.pb-age.stale{color:var(--warn)} .pb-age.stale::before{background:var(--warn);animation:none}
+.pb-i.fl-up{animation:flup .9s ease-out} .pb-i.fl-dn{animation:fldn .9s ease-out}
+@keyframes flup{0%{background:color-mix(in srgb,var(--good) 38%,var(--panel2))}100%{background:var(--panel2)}}
+@keyframes fldn{0%{background:color-mix(in srgb,var(--bad) 38%,var(--panel2))}100%{background:var(--panel2)}}
 
 /* tokennetwerk */
 .netbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
@@ -436,7 +442,7 @@ function freshState(mode) {
   return {
     mode, scanning: false, refreshing: false, fallback: false,
     filters: {chains: [], ...PRESETS.gebalanceerd.f}, preset: 'gebalanceerd',
-    settings: {scanSec: 90, refreshSec: 20, secPerScan: 12, startCash: 10000, query: '', watch: [], autoScan: true,
+    settings: {scanSec: 90, refreshSec: 20, posRefreshSec: 4, secPerScan: 12, startCash: 10000, query: '', watch: [], autoScan: true,
       trade: {size: 250, tp: 50, sl: 25, trail: 0},
       auto: {on: false, size: 250, max: 5, allowWarn: false}},
     blocks: [], sec: {}, seen: {}, tokens: {}, pending: {},
@@ -842,7 +848,7 @@ async function doBuy(key, amount, o = {}) {
       tp: +o.tp || 0, sl: +o.sl || 0, trail: +o.trail || 0, auto: !!o.auto});
   }
   await ledgerAdd({type: 'buy', key, sym: t.sym, chain: t.chain, usd: amount, qty: q.qty, price: q.exec, fee: q.fee, impact: q.impact, auto: !!o.auto});
-  saveSoon();
+  nextPosAt = 0; saveSoon();
   return {ok: true, msg: `Papier-trade, gekocht: ${t.sym} voor ${money(amount)} (impact ${(q.impact * 100).toFixed(2)}%)`};
 }
 async function doSell(posId, frac, reason = 'Handmatig') {
@@ -870,7 +876,8 @@ async function markPortfolio() {
     else if (p.trail && t.price <= p.peak * (1 - p.trail / 100) && p.peak > p.entry) reason = 'Trailing stop';
     if (reason) { const r = await doSell(p.id, 1, reason); toast(`${reason}: ${r.msg}`, r.pnl >= 0 ? 'good' : 'bad'); }
   }
-  S.pf.eq.push({t: Date.now(), v: equity()}); if (S.pf.eq.length > 600) S.pf.eq.shift();
+  if (!S.pf.eq.length || Date.now() - S.pf.eq.at(-1).t > 15000) S.pf.eq.push({t: Date.now(), v: equity()});
+  if (S.pf.eq.length > 600) S.pf.eq.shift();
 }
 async function autoTrade() {
   const a = S.settings.auto, last = S.blocks.at(-1); if (!last) return;
@@ -883,8 +890,24 @@ async function autoTrade() {
     if (r.ok) toast('Auto-trade: ' + r.msg, 'good');
   }
 }
+let nextPosAt = 0, pointerDown = false;
+['pointerdown'].forEach(ev => addEventListener(ev, () => pointerDown = true, true));
+['pointerup', 'pointercancel'].forEach(ev => addEventListener(ev, () => pointerDown = false, true));
+async function fastRefresh() {
+  if (S.posRefreshing || S.refreshing || S.scanning || !S.pf.pos.length) return;
+  S.posRefreshing = true;
+  try {
+    const keys = new Set(S.pf.pos.map(p => p.key)); if (S.ui.drawer) keys.add(S.ui.drawer);
+    const m = S.mode === 'demo' ? Demo.refresh([...keys], .12) : await fetchPairsFor([...keys]);
+    if (m.size) { for (const [k, t] of m) { noteSeen(t); S.tokens[k] = t; } S.lastPosUpdate = Date.now(); await markPortfolio(); }
+  } catch (e) {
+  } finally {
+    S.posRefreshing = false; nextPosAt = Date.now() + S.settings.posRefreshSec * 1000;
+    renderPosBar(); updateTop(); updateDrawerLive(); if (S.ui.tab === 'portfolio' && !pointerDown) renderPortfolio(); saveSoon();
+  }
+}
 async function refreshPrices() {
-  if (S.refreshing || S.scanning) return; S.refreshing = true;
+  if (S.refreshing || S.scanning || S.posRefreshing) return; S.refreshing = true;
   try {
     const keys = new Set(S.pf.pos.map(p => p.key));
     S.blocks.at(-1)?.snap.forEach(t => keys.add(t.key));
@@ -894,7 +917,7 @@ async function refreshPrices() {
     else { try { m = await fetchPairsFor([...keys].filter(k => !k.startsWith('?'))); } catch (e) { m = new Map(); } }
     for (const [k, t] of m) { noteSeen(t); S.tokens[k] = t; }
     await markPortfolio();
-  } finally { S.refreshing = false; nextRefreshAt = Date.now() + S.settings.refreshSec * 1000; render(); updateDrawerLive(); saveSoon(); }
+  } finally { S.refreshing = false; nextRefreshAt = Date.now() + S.settings.refreshSec * 1000; S.lastPosUpdate = Date.now(); render(); updateDrawerLive(); saveSoon(); }
 }
 function findToken(key) {
   for (let i = S.blocks.length - 1; i >= 0; i--) { const t = S.blocks[i].snap.find(x => x.key === key); if (t) return t; }
@@ -926,13 +949,13 @@ const Demo = (() => {
       c5: norm() * 2, c1: norm() * 9, c6: norm() * 20, c24: norm() * 40 + (rnd() < .1 ? 300 * rnd() : 0), fdv: price * sup, mcap: price * sup,
       created: Date.now() - ageH * 36e5, web: rnd() < .55 ? 1 : 0, soc: rnd() < .65 ? 2 : 0, boost: 0, ts: Date.now()}};
   }
-  function step(u) {
+  function step(u, k = 1) {
     const t = u.t; t.ts = Date.now();
-    let g = Math.exp(norm() * .035 + .001);
-    if (u.f.rug && !u.rugged && rnd() < .05) { u.rugged = true; g = .15; t.liq *= .08; t.c1 = -85; t.c24 = -90; }
+    let g = Math.exp(norm() * .035 * k + .001 * k);
+    if (u.f.rug && !u.rugged && rnd() < .05 * k) { u.rugged = true; g = .15; t.liq *= .08; t.c1 = -85; t.c24 = -90; }
     t.price *= g; t.mcap = t.fdv = t.fdv * g; t.liq *= u.rugged ? 1 : Math.exp(norm() * .01);
     t.c5 = (g - 1) * 100; t.c1 = u.rugged ? t.c1 : t.c1 * .9 + (g - 1) * 100 * 2; t.c24 += (g - 1) * 40;
-    t.v24 *= 1 + (rnd() - .45) * .02; t.b24 += Math.round(rnd() * 6); if (!u.f.hp) t.s24 += Math.round(rnd() * 5);
+    t.v24 *= 1 + (rnd() - .45) * .02 * k; t.b24 += Math.round(rnd() * 6 * k); if (!u.f.hp) t.s24 += Math.round(rnd() * 5 * k);
   }
   return {
     scan() {
@@ -941,8 +964,8 @@ const Demo = (() => {
       uni.forEach(step); n++;
       return uni.slice(-30).map(u => ({...u.t}));
     },
-    refresh(keys) {
-      const m = new Map(); uni.forEach(step);
+    refresh(keys, k = 1) {
+      const m = new Map(); uni.forEach(u => step(u, k));
       for (const u of uni) if (keys.includes(u.t.key)) m.set(u.t.key, {...u.t});
       return m;
     },
@@ -1176,6 +1199,7 @@ function updateTop() {
   const eq = equity(), pnl = eq - S.pf.start;
   $('#wallet').innerHTML = `<div><span>Saldo</span><b class="num">${money(S.pf.cash)}</b></div><div><span>Waarde</span><b class="num">${money(eq)}</b></div><div><span>Winst/verlies</span><b class="num ${pnl >= 0 ? 'up' : 'dn'}">${pnl >= 0 ? '+' : ''}${money(pnl)}</b></div>`;
   $('#m-live').setAttribute('aria-pressed', live); $('#m-demo').setAttribute('aria-pressed', !live);
+  const ag = $('#pb-age'); if (ag && S.lastPosUpdate) { const a = Math.round((Date.now() - S.lastPosUpdate) / 1000); ag.textContent = `koers ${a}s oud`; ag.classList.toggle('stale', a > 30); }
   $('#scanbtn').disabled = S.scanning;
   $('#banner').innerHTML = S.mode === 'demo' ? `<div class="banner"><b>Demo-modus.</b> Dit zijn gesimuleerde tokens en geen echte markt. ${S.fallback ? 'De live API was niet bereikbaar vanuit deze omgeving. ' : ''}Open <span class="mono">index.html</span> in je eigen browser voor live DexScreener-data.<button class="btn sm" data-act="mode" data-v="live">Probeer live</button></div>` : '';
 }
@@ -1212,14 +1236,25 @@ function queueVisibleSec() {
 /* ---------- UI: open posities ---------- */
 function renderPosBar() {
   const el = $('#posbar'), pos = S.pf.pos;
-  if (!pos.length || S.ui.tab === 'portfolio') { el.hidden = true; return; }
+  if (!pos.length || S.ui.tab === 'portfolio') { el.hidden = true; el.dataset.sig = ''; return; }
   el.hidden = false;
-  const tot = pos.reduce((a, p) => a + p.qty * p.last - p.cost, 0), armed = S.ui.armAll && Date.now() - S.ui.armAll < 4000;
-  el.innerHTML = `<div class="pb-h"><b>Open posities (${pos.length})</b><span class="num ${tot >= 0 ? 'up' : 'dn'}">${tot >= 0 ? '+' : ''}${money(tot)}</span>
-    <button class="btn sm bad" data-act="sellall">${armed ? 'Zeker weten? Klik nogmaals' : 'Verkoop alles'}</button></div>
-    <div class="pb-list">${pos.map(p => { const v = p.qty * p.last, r = (v / p.cost - 1) * 100;
-      return `<div class="pb-i"><button class="pb-s" data-act="open" data-k="${esc(p.key)}" title="Details"><b>${esc(p.sym)}</b> ${chainBadge(p.chain)}</button><span class="mono num">${money(v)}</span>${pct(r)}
-        <div class="pb-btns"><button class="btn sm" data-act="sell" data-id="${p.id}" data-f="0.5">50%</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-f="1">Verkoop</button></div></div>`; }).join('')}</div>`;
+  const armed = !!(S.ui.armAll && Date.now() - S.ui.armAll < 4000), sig = pos.map(p => p.id).join(',') + '|' + armed;
+  if (el.dataset.sig !== sig) {
+    el.dataset.sig = sig;
+    el.innerHTML = `<div class="pb-h"><b>Open posities (${pos.length})</b><span class="num pb-tot"></span><span class="pb-age" id="pb-age"></span>
+      <button class="btn sm bad" data-act="sellall">${armed ? 'Zeker weten? Klik nogmaals' : 'Verkoop alles'}</button></div>
+      <div class="pb-list">${pos.map(p => `<div class="pb-i" data-id="${p.id}" data-v="${p.qty * p.last}"><button class="pb-s" data-act="open" data-k="${esc(p.key)}" title="Details"><b>${esc(p.sym)}</b> ${chainBadge(p.chain)}</button><span class="mono num pb-v"></span><span class="num pb-r"></span>
+        <div class="pb-btns"><button class="btn sm" data-act="sell" data-id="${p.id}" data-f="0.5">50%</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-f="1">Verkoop</button></div></div>`).join('')}</div>`;
+  }
+  const tot = pos.reduce((a, p) => a + p.qty * p.last - p.cost, 0), te = $('.pb-tot', el);
+  te.textContent = `${tot >= 0 ? '+' : ''}${money(tot)}`; te.className = `num pb-tot ${tot >= 0 ? 'up' : 'dn'}`;
+  for (const p of pos) {
+    const row = el.querySelector(`.pb-i[data-id="${p.id}"]`); if (!row) continue;
+    const v = p.qty * p.last, pnl = v - p.cost, old = +row.dataset.v;
+    if (Math.abs(v - old) > 1e-9) { row.classList.remove('fl-up', 'fl-dn'); void row.offsetWidth; row.classList.add(v > old ? 'fl-up' : 'fl-dn'); }
+    row.dataset.v = v; row.querySelector('.pb-v').textContent = money(v);
+    row.querySelector('.pb-r').innerHTML = `${pct(pnl / p.cost * 100, 2)} <span class="mute">${pnl >= 0 ? '+' : ''}${money(pnl)}</span>`;
+  }
 }
 async function sellAll() {
   const list = [...S.pf.pos]; let total = 0, n = 0;
@@ -1333,7 +1368,7 @@ function renderSettings() {
       <label class="chk"><input type="checkbox" id="a-warn" ${a.allowWarn ? 'checked' : ''}> Ook tokens met waarschuwingen (geen rode vlaggen)</label>
     </div><p class="note">De auto-trader koopt alleen tokens die alle filters halen en niet eerder zijn verhandeld. Een token met honeypot-uitslag wordt nooit gekocht.</p></div>
     <div class="panel"><h2>Standaard exit-regels</h2><div class="fgrid">${num('t-tp', 'Take profit (%)', t.tp, 5, '0 = uit')}${num('t-sl', 'Stop loss (%)', t.sl, 5, '0 = uit')}${num('t-trail', 'Trailing stop (%)', t.trail, 5, '0 = uit')}${num('t-size', 'Standaard handmatig bedrag ($)', t.size, 25)}</div></div></div>
-    <div class="two"><div class="panel"><h2>Scanner</h2><div class="fgrid">${num('s-scan', 'Scan-interval (sec)', s.scanSec, 10)}${num('s-ref', 'Koers verversen (sec)', s.refreshSec, 5)}${num('s-sec', 'Beveiligingschecks per scan', s.secPerScan, 1)}
+    <div class="two"><div class="panel"><h2>Scanner</h2><div class="fgrid">${num('s-scan', 'Scan-interval (sec)', s.scanSec, 10)}${num('s-ref', 'Koers tokenlijst verversen (sec)', s.refreshSec, 5)}${num('s-posref', 'Koers open posities verversen (sec)', s.posRefreshSec, 1, 'Kleiner = sneller PnL en stop loss. DexScreener staat ruim 300 verzoeken per minuut toe.')}${num('s-sec', 'Beveiligingschecks per scan', s.secPerScan, 1)}
       <div class="fld wide"><label for="s-query">Extra zoekterm op DexScreener (optioneel)</label><input type="text" id="s-query" value="${esc(s.query)}" placeholder="bijv. pump, base, AI"></div>
       <div class="fld wide"><label for="s-watch">Watchlist (één per regel: keten:tokenadres)</label><textarea id="s-watch" placeholder="solana:So1111…&#10;base:0x4200…">${esc(s.watch.map(w => w.chain + ':' + w.addr).join('\n'))}</textarea></div></div></div>
     <div class="panel"><h2>Portfolio</h2><div class="fgrid">${num('s-cash', 'Startkapitaal ($)', s.startCash, 1000)}</div>
@@ -1344,7 +1379,7 @@ function renderSettings() {
   bind('a-on', e => a.on = e.checked); bind('a-warn', e => a.allowWarn = e.checked);
   bind('a-size', e => a.size = +e.value || 0); bind('a-max', e => a.max = +e.value || 0);
   bind('t-tp', e => t.tp = +e.value || 0); bind('t-sl', e => t.sl = +e.value || 0); bind('t-trail', e => t.trail = +e.value || 0); bind('t-size', e => t.size = +e.value || 0);
-  bind('s-scan', e => s.scanSec = clamp(+e.value || 90, 20, 3600)); bind('s-ref', e => s.refreshSec = clamp(+e.value || 20, 5, 600)); bind('s-sec', e => s.secPerScan = clamp(+e.value || 0, 0, 40));
+  bind('s-scan', e => s.scanSec = clamp(+e.value || 90, 20, 3600)); bind('s-ref', e => s.refreshSec = clamp(+e.value || 20, 5, 600)); bind('s-posref', e => { s.posRefreshSec = clamp(+e.value || 4, 2, 120); }); bind('s-sec', e => s.secPerScan = clamp(+e.value || 0, 0, 40));
   bind('s-query', e => s.query = e.value); bind('s-cash', e => s.startCash = Math.max(100, +e.value || 10000));
   bind('s-watch', e => s.watch = e.value.split('\n').map(l => l.trim()).filter(l => l.includes(':')).map(l => { const i = l.indexOf(':'); return {chain: l.slice(0, i).trim().toLowerCase(), addr: l.slice(i + 1).trim()}; }).filter(w => w.addr));
 }
@@ -1482,6 +1517,7 @@ function tick() {
   const now = Date.now();
   if (!S.scanning && S.settings.autoScan && nextScanAt && now >= nextScanAt) scan();
   else if (!S.scanning && !S.refreshing && nextRefreshAt && now >= nextRefreshAt) refreshPrices();
+  else if (S.pf.pos.length && now >= nextPosAt) fastRefresh();
   updateTop();
 }
 (async function init() {
