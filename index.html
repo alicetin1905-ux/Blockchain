@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>ChainScout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: sticky kopbalk, links filters, rechts een horizontale keten van blokken met daaronder de tokens (transacties) van het gekozen blok. */
+:root{
+  --bg:#080c13; --panel:#0e1521; --panel2:#131d2e; --line:#1d2a42; --chain:#2c3f63;
+  --fg:#dce5f4; --mute:#8091ad; --accent:#4cc9f0; --accent-ink:#04141c;
+  --good:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#8091ad;
+  --f-head:'Chakra Petch','Segoe UI',system-ui,sans-serif;
+  --f-body:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#eef2f8; --panel:#ffffff; --panel2:#f1f5fb; --line:#d6deeb; --chain:#a9b9d3;
+    --fg:#13203a; --mute:#5b6b87; --accent:#0a7aa8; --accent-ink:#ffffff;
+    --good:#0c8f64; --warn:#a96a05; --bad:#cf2e48; --info:#5b6b87; color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef2f8; --panel:#ffffff; --panel2:#f1f5fb; --line:#d6deeb; --chain:#a9b9d3;
+  --fg:#13203a; --mute:#5b6b87; --accent:#0a7aa8; --accent-ink:#ffffff;
+  --good:#0c8f64; --warn:#a96a05; --bad:#cf2e48; --info:#5b6b87; color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--f-mono)}
+.num{font-variant-numeric:tabular-nums}
+.up{color:var(--good)} .dn{color:var(--bad)} .mute{color:var(--mute)}
+h1,h2,h3{font-family:var(--f-head);margin:0;font-weight:600;text-wrap:balance}
+
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 40px;max-width:1700px;margin:0 auto}
+
+/* kopbalk */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--bg)}
+.top .wrap{padding-bottom:0}
+.top-in{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding-block:10px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--f-head);font-weight:700;font-size:20px;letter-spacing:.04em}
+.brand svg{width:26px;height:26px}
+.brand small{font:500 11px var(--f-mono);color:var(--mute);letter-spacing:0;margin-left:2px}
+.status{display:flex;align-items:center;gap:8px;font:12px var(--f-mono);color:var(--mute)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 22%,transparent)}
+.dot.busy{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent);animation:pulse 1s infinite}
+.dot.off{background:var(--mute);box-shadow:none}
+@keyframes pulse{50%{opacity:.35}}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{background:none;border:0;padding:4px 10px;font:600 11px var(--f-mono);letter-spacing:.06em;color:var(--mute)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.wallet{display:flex;gap:18px;margin-left:auto;flex-wrap:wrap}
+.wallet div{display:flex;flex-direction:column;line-height:1.15}
+.wallet span{font:500 10px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+.wallet b{font:600 16px var(--f-head)}
+.tabs{display:flex;gap:2px;width:100%;overflow-x:auto}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 14px;font:600 13px var(--f-head);letter-spacing:.05em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
+.tabs button[aria-selected="true"]{color:var(--fg);border-color:var(--accent)}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-weight:500}
+.btn:hover{border-color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.good{background:color-mix(in srgb,var(--good) 18%,var(--panel2));border-color:var(--good);color:var(--good);font-weight:600}
+.btn.bad{background:color-mix(in srgb,var(--bad) 14%,var(--panel2));border-color:color-mix(in srgb,var(--bad) 55%,var(--line));color:var(--bad)}
+.btn.sm{padding:3px 9px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.banner{margin-top:12px;padding:9px 12px;border:1px solid color-mix(in srgb,var(--warn) 50%,var(--line));background:color-mix(in srgb,var(--warn) 10%,var(--panel));border-radius:6px;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+/* scanner */
+.scan{display:grid;grid-template-columns:292px minmax(0,1fr);gap:18px;padding-top:16px;align-items:start}
+.filters{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 108px);max-height:calc(100vh - 130px);overflow:auto}
+.filters h3{font-size:13px;letter-spacing:.08em;text-transform:uppercase;margin:16px 0 8px;color:var(--mute)}
+.filters h3:first-child{margin-top:0}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fld{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fld.wide{grid-column:1/-1}
+.fld label{font-size:11px;color:var(--mute)}
+.fld input[type=number],.fld select,.fld input[type=text],.fld textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font:13px var(--f-mono);min-width:0}
+.fld textarea{resize:vertical;min-height:60px}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px;grid-column:1/-1}
+.chk input{accent-color:var(--accent)}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--bg);border-radius:99px;padding:2px 9px;font:500 11px var(--f-mono);color:var(--mute)}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.filt-toggle{display:none}
+
+.strip-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.strip-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.strip-head h2{font-size:15px;letter-spacing:.06em;text-transform:uppercase}
+.strip{display:flex;align-items:stretch;overflow-x:auto;padding:12px 2px 8px;scroll-behavior:smooth}
+.blk{flex:0 0 176px;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 10px;display:flex;flex-direction:column;gap:3px;position:relative}
+.blk:hover{border-color:var(--chain)}
+.blk[aria-current="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.blk .bh{font:700 13px var(--f-head);letter-spacing:.05em;display:flex;justify-content:space-between}
+.blk .head-tag{font:600 9px var(--f-mono);background:var(--accent);color:var(--accent-ink);border-radius:3px;padding:1px 5px;letter-spacing:.08em}
+.blk .hs{font:11px var(--f-mono);color:var(--accent)}
+.blk .pv{font:10px var(--f-mono);color:var(--mute)}
+.blk .bs{font:11px var(--f-mono);display:flex;justify-content:space-between;margin-top:3px}
+.blk .bt{font:10px var(--f-mono);color:var(--mute)}
+.blk.pending{border-style:dashed;background:transparent;justify-content:center;cursor:default;min-height:104px}
+.bar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent);width:0}
+.lnk{flex:0 0 30px;align-self:center;height:2px;background:repeating-linear-gradient(90deg,var(--chain) 0 5px,transparent 5px 8px);position:relative}
+.lnk::after{content:"";position:absolute;right:-1px;top:-3px;border:4px solid transparent;border-left:6px solid var(--chain)}
+.bdetail{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 18px;margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+.bdetail div{min-width:0}
+.bdetail span{display:block;font:500 10px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+.bdetail code{font:12px var(--f-mono);overflow-wrap:anywhere}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0 12px}
+.toolbar .grow{flex:1 1 220px;min-width:0}
+.toolbar input[type=search],.toolbar select{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px}
+.toolbar input[type=search]{width:100%}
+.sw{display:flex;gap:7px;align-items:center;font-size:13px;white-space:nowrap}
+.sw input{accent-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:9px;min-width:0;position:relative}
+.card.pass{border-color:color-mix(in srgb,var(--good) 55%,var(--line))}
+.card.fail{opacity:.72}
+.card.fail:hover{opacity:1}
+.c-top{display:flex;gap:10px;align-items:center;min-width:0}
+.ico{width:38px;height:38px;border-radius:50%;background:var(--panel2);border:1px solid var(--line);object-fit:cover;flex:none;display:grid;place-items:center;font:700 14px var(--f-head);color:var(--mute);overflow:hidden}
+.ico img{width:100%;height:100%;object-fit:cover}
+.c-id{min-width:0;flex:1}
+.c-id b{font:700 16px var(--f-head);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-id small{display:flex;gap:6px;align-items:center;color:var(--mute);font:11px var(--f-mono);white-space:nowrap}
+.cb{font:600 9px var(--f-mono);letter-spacing:.06em;border-radius:3px;padding:1px 5px;color:var(--accent-ink)}
+.ring{width:44px;height:44px;flex:none;position:relative}
+.ring svg{width:44px;height:44px;transform:rotate(-90deg)}
+.ring b{position:absolute;inset:0;display:grid;place-items:center;font:700 13px var(--f-head)}
+.c-price{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.c-price b{font:600 18px var(--f-mono)}
+.c-price span{font:12px var(--f-mono)}
+.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.kv div{background:var(--panel2);border-radius:6px;padding:5px 7px;min-width:0}
+.kv span{display:block;font:500 9px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.kv b{font:500 12px var(--f-mono);white-space:nowrap}
+.bs-bar{height:5px;border-radius:3px;background:var(--bad);overflow:hidden;display:flex}
+.bs-bar i{background:var(--good);display:block}
+.bs-lab{display:flex;justify-content:space-between;font:10px var(--f-mono);color:var(--mute);margin-top:4px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{font:600 11px var(--f-body);border-radius:99px;padding:2px 9px;border:1px solid;display:inline-flex;gap:5px;align-items:center}
+.pill.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 55%,transparent);background:color-mix(in srgb,var(--good) 10%,transparent)}
+.pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 55%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent)}
+.pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 55%,transparent);background:color-mix(in srgb,var(--bad) 10%,transparent)}
+.pill.unk{color:var(--mute);border-color:var(--line)}
+.fails{display:flex;gap:5px;flex-wrap:wrap}
+.fails span{font:11px var(--f-mono);color:var(--mute);background:var(--panel2);border-radius:4px;padding:1px 6px}
+.c-act{display:flex;gap:6px;margin-top:auto}
+.c-act .btn{flex:1}
+.since{font:11px var(--f-mono);color:var(--mute)}
+.empty{padding:36px 16px;text-align:center;color:var(--mute);border:1px dashed var(--line);border-radius:10px}
+
+/* portfolio / tabellen */
+.page{padding-top:16px;display:grid;gap:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.tile span{font:500 10px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+.tile b{display:block;font:600 20px var(--f-head);margin-top:2px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.panel h2{font-size:14px;letter-spacing:.07em;text-transform:uppercase;margin-bottom:10px}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font:500 10px var(--f-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--mute);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+td.r,th.r{text-align:right}
+td .mono{font-size:12px}
+.spark{width:100%;height:120px;display:block}
+.two{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+
+/* grootboek */
+.ledger{display:flex;flex-direction:column;gap:0}
+.lb{display:grid;grid-template-columns:20px minmax(0,1fr);gap:12px}
+.lb .rail{display:flex;flex-direction:column;align-items:center}
+.lb .rail i{width:11px;height:11px;border-radius:50%;border:2px solid var(--accent);background:var(--bg);margin-top:16px;flex:none}
+.lb .rail u{flex:1;width:2px;background:var(--chain)}
+.lb .body{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin:6px 0;display:grid;gap:3px}
+.lb .l1{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;justify-content:space-between}
+.lb .l1 b{font:700 13px var(--f-head);letter-spacing:.04em}
+.lb code{font:11px var(--f-mono);color:var(--mute);overflow-wrap:anywhere}
+.tag{font:600 10px var(--f-mono);padding:1px 6px;border-radius:3px;letter-spacing:.06em}
+.tag.buy{background:color-mix(in srgb,var(--good) 20%,transparent);color:var(--good)}
+.tag.sell{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.tag.gen{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgb(0 0 0/.5);z-index:40}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:50;overflow:auto;padding:calc(16px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) 16px;display:flex;flex-direction:column;gap:14px}
+.d-head{display:flex;gap:12px;align-items:center}
+.d-head .x{margin-left:auto}
+.d-sec{display:grid;gap:8px}
+.d-sec h3{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute)}
+.risk{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+.risk li{display:flex;gap:8px;font-size:13px;align-items:flex-start}
+.risk li::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--info)}
+.risk .ok::before{background:var(--good)} .risk .warn::before{background:var(--warn)} .risk .bad::before{background:var(--bad)}
+.ticket{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:10px}
+.amts{display:flex;gap:6px;flex-wrap:wrap}
+.q{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font:12px var(--f-mono)}
+.q span:nth-child(odd){color:var(--mute)}
+.q span:nth-child(even){text-align:right}
+iframe.chart{width:100%;height:340px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:60;display:grid;gap:8px;width:min(440px,calc(100% - 32px))}
+.toast{background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 12px;font-size:13px;box-shadow:0 8px 30px rgb(0 0 0/.35)}
+.toast.bad{border-color:var(--bad)} .toast.good{border-color:var(--good)}
+.note{font-size:12px;color:var(--mute)}
+
+@media (max-width:980px){
+  .scan{grid-template-columns:minmax(0,1fr)}
+  .filters{position:static;max-height:none;display:none}
+  .filters.open{display:block}
+  .filt-toggle{display:inline-block}
+  .two{grid-template-columns:minmax(0,1fr)}
+  .wallet{margin-left:0;width:100%}
+}
+@media (max-width:700px){.top{position:static}.drawer{width:100%}}
+@media (max-width:520px){.kv{grid-template-columns:repeat(2,1fr)} .grid{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top"><div class="wrap">
+    <div class="top-in">
+      <div class="brand">
+        <svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="2" y="9" width="10" height="10" rx="2" stroke="var(--accent)" stroke-width="2"/><rect x="16" y="9" width="10" height="10" rx="2" stroke="var(--accent)" stroke-width="2"/><path d="M12 14h4" stroke="var(--accent)" stroke-width="2"/></svg>
+        <span>CHAINSCOUT</span><small>paper</small>
+      </div>
+      <div class="status" id="status" aria-live="polite"></div>
+      <div class="seg" role="group" aria-label="Databron">
+        <button id="m-live" data-act="mode" data-v="live" aria-pressed="true">LIVE</button>
+        <button id="m-demo" data-act="mode" data-v="demo" aria-pressed="false">DEMO</button>
+      </div>
+      <label class="sw"><input type="checkbox" id="autoscan" checked> Auto-scan</label>
+      <button class="btn sm" data-act="scan" id="scanbtn">Scan nu</button>
+      <div class="wallet" id="wallet"></div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-act="tab" data-v="scanner" aria-selected="true">Scanner</button>
+      <button role="tab" data-act="tab" data-v="portfolio" aria-selected="false">Portfolio</button>
+      <button role="tab" data-act="tab" data-v="ledger" aria-selected="false">Grootboek</button>
+      <button role="tab" data-act="tab" data-v="settings" aria-selected="false">Instellingen</button>
+    </nav>
+  </div></header>
+
+  <main class="wrap">
+    <div id="banner"></div>
+    <section id="v-scanner" class="scan">
+      <aside class="filters" id="filters" aria-label="Filters"></aside>
+      <div style="min-width:0">
+        <div class="strip-box">
+          <div class="strip-head">
+            <h2>Keten van scans</h2>
+            <span class="note" id="chainnote"></span>
+          </div>
+          <div class="strip" id="strip"></div>
+          <div class="bdetail" id="bdetail"></div>
+        </div>
+        <div class="toolbar">
+          <button class="btn filt-toggle" data-act="filt">Filters</button>
+          <div class="grow"><input type="search" id="q" placeholder="Zoek op symbool, naam of adres" aria-label="Zoeken"></div>
+          <select id="sort" aria-label="Sorteren">
+            <option value="score">Sorteer: score</option><option value="liq">Liquiditeit</option><option value="v24">Volume 24u</option>
+            <option value="age">Nieuwste eerst</option><option value="c1">Koers 1u</option>
+          </select>
+          <label class="sw"><input type="checkbox" id="onlypass"> Alleen gevalideerd</label>
+        </div>
+        <div class="note" id="count" style="margin-bottom:10px"></div>
+        <div class="grid" id="grid"></div>
+      </div>
+    </section>
+    <section id="v-portfolio" class="page" hidden></section>
+    <section id="v-ledger" class="page" hidden></section>
+    <section id="v-settings" class="page" hidden></section>
+  </main>
+</div>
+<div id="drawer-root"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* =========================================================================
+   ChainScout – DexScreener scanner, honeypot/rug-checks en paper trading
+   Alles draait in de browser. Geen backend, geen API-sleutels.
+   ========================================================================= */
+const DS = 'https://api.dexscreener.com';
+const CHAINS = {
+  ethereum:{id:1,evm:1}, bsc:{id:56,evm:1}, base:{id:8453,evm:1}, arbitrum:{id:42161,evm:1},
+  polygon:{id:137,evm:1}, avalanche:{id:43114,evm:1}, optimism:{id:10,evm:1}, solana:{sol:1}
+};
+const GAS = {ethereum:4, bsc:.15, base:.08, arbitrum:.08, optimism:.08, polygon:.03, avalanche:.1, solana:.02};
+const DEX_FEE = 0.003;
+const ZERO = '0x' + '0'.repeat(64);
+const SEC_TTL = 30 * 60e3;
+
+/* ---------- helpers ---------- */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl = u => /^https:\/\//.test(u || '') ? u : '';
+const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+const isEvm = c => !!CHAINS[c]?.evm;
+const keyOf = (chain, addr) => chain + ':' + (CHAINS[chain]?.sol ? addr : String(addr).toLowerCase());
+function usd(n, d = 1) {
+  n = +n; if (!isFinite(n)) return '–'; const a = Math.abs(n);
+  if (a >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (a >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return '$' + (n / 1e3).toFixed(d) + 'K';
+  return '$' + n.toFixed(a < 10 ? 2 : 0);
+}
+const money = n => (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString('nl-NL', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+function px(n) {
+  n = +n; if (!n) return '$0';
+  if (n >= 1000) return '$' + n.toLocaleString('nl-NL', {maximumFractionDigits: 2});
+  if (n >= 1) return '$' + n.toFixed(4);
+  return '$' + n.toFixed(Math.min(14, Math.max(0, -Math.floor(Math.log10(n))) + 4));
+}
+const pct = (n, d = 1) => {
+  if (n == null || !isFinite(n)) return '<span class="mute">–</span>';
+  return `<span class="${n >= 0 ? 'up' : 'dn'}">${n >= 0 ? '+' : ''}${(+n).toFixed(d)}%</span>`;
+};
+const qtyFmt = n => n >= 1000 ? Math.round(n).toLocaleString('nl-NL') : n >= 1 ? n.toFixed(2) : n.toPrecision(3);
+const ageStr = h => h < 1 ? Math.max(1, Math.round(h * 60)) + 'm' : h < 48 ? h.toFixed(1) + 'u' : (h / 24).toFixed(1) + 'd';
+const shortH = h => h ? h.slice(0, 8) + '…' + h.slice(-6) : '–';
+const shortA = a => a && a.length > 14 ? a.slice(0, 6) + '…' + a.slice(-4) : a || '';
+const hhmmss = ts => new Date(ts).toLocaleTimeString('nl-NL');
+const chainHue = c => { let h = 0; for (const ch of c) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; };
+const chainBadge = c => `<span class="cb" style="background:hsl(${chainHue(c)} 70% 62%)">${esc(c.toUpperCase().slice(0, 6))}</span>`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function sha256(str) {
+  try {
+    if (crypto?.subtle) {
+      const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {}
+  // terugval voor onveilige contexten (http): 4 x cyrb53
+  let out = '';
+  for (let s = 0; s < 4; s++) {
+    let h1 = 0xdeadbeef ^ s, h2 = 0x41c6ce57 ^ s;
+    for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    out += (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+  }
+  return out;
+}
+async function mine(payload, prefix = '00') {
+  let nonce = 0, hash;
+  for (;;) { hash = await sha256(payload + nonce); if (hash.startsWith(prefix) || nonce > 30000) break; nonce++; }
+  return {hash, nonce};
+}
+async function jget(url, timeout = 12000) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const r = await fetch(url, {signal: ctl.signal});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+/* ---------- standaardinstellingen en presets ---------- */
+const PRESETS = {
+  veilig: {label:'Veilig', f:{minLiq:50000, minVol24:100000, minTx24:400, minAgeH:24, maxAgeH:0, minMcap:100000, maxMcap:0, minCh1:-15, maxCh24:300, minBuy:40, maxBuy:65, minLiqMcap:3, maxVolLiq:25, needSocial:true, secMode:'strict', maxTax:5, maxTop:20, minLpLock:70, noMint:true, noOwnerRisk:true, minScore:65}},
+  gebalanceerd: {label:'Gebalanceerd', f:{minLiq:15000, minVol24:25000, minTx24:150, minAgeH:1, maxAgeH:720, minMcap:0, maxMcap:0, minCh1:-30, maxCh24:1000, minBuy:30, maxBuy:75, minLiqMcap:1, maxVolLiq:60, needSocial:false, secMode:'normal', maxTax:10, maxTop:35, minLpLock:0, noMint:false, noOwnerRisk:true, minScore:50}},
+  degen: {label:'Degen', f:{minLiq:5000, minVol24:5000, minTx24:50, minAgeH:0, maxAgeH:48, minMcap:0, maxMcap:0, minCh1:-50, maxCh24:0, minBuy:20, maxBuy:90, minLiqMcap:0, maxVolLiq:0, needSocial:false, secMode:'normal', maxTax:20, maxTop:50, minLpLock:0, noMint:false, noOwnerRisk:false, minScore:30}}
+};
+const FIELD_GROUPS = [
+  ['Markt', [
+    ['minLiq','Min. liquiditeit ($)',1000], ['minVol24','Min. volume 24u ($)',1000],
+    ['minTx24','Min. transacties 24u',10], ['minLiqMcap','Min. liq/mcap (%)',1],
+    ['minMcap','Min. marktcap ($)',10000], ['maxMcap','Max. marktcap ($, 0=uit)',10000],
+    ['maxVolLiq','Max. volume/liq (×, 0=uit)',5], ['minScore','Min. score (0-100)',5]]],
+  ['Leeftijd en momentum', [
+    ['minAgeH','Min. leeftijd (uur)',1], ['maxAgeH','Max. leeftijd (uur, 0=uit)',24],
+    ['minCh1','Min. koers 1u (%)',5], ['maxCh24','Max. koers 24u (%, 0=uit)',100],
+    ['minBuy','Min. koopaandeel (%)',5], ['maxBuy','Max. koopaandeel (%)',5]]],
+  ['Beveiliging', [
+    ['maxTax','Max. buy/sell tax (%)',1], ['maxTop','Max. grootste holder (%)',5], ['minLpLock','Min. LP vergrendeld (%)',10]]]
+];
+
+function freshState(mode) {
+  return {
+    mode, scanning: false, refreshing: false, fallback: false,
+    filters: {chains: [], ...PRESETS.gebalanceerd.f}, preset: 'gebalanceerd',
+    settings: {scanSec: 90, refreshSec: 20, secPerScan: 12, startCash: 10000, query: '', watch: [], autoScan: true,
+      trade: {size: 250, tp: 50, sl: 25, trail: 0},
+      auto: {on: false, size: 250, max: 5, allowWarn: false}},
+    blocks: [], sec: {}, seen: {}, tokens: {}, pending: {},
+    pf: {cash: 10000, start: 10000, pos: [], hist: [], eq: [], fees: 0},
+    ledger: [],
+    ui: {tab: 'scanner', sel: null, sort: 'score', onlyPass: false, q: '', drawer: null, chart: false}
+  };
+}
+let S = freshState('live');
+let nextScanAt = 0, nextRefreshAt = 0, lastScanInfo = '';
+
+/* ---------- opslag ---------- */
+const storeKey = m => 'chainscout.v1.' + m;
+function save() {
+  try {
+    const secKeys = Object.keys(S.sec).sort((a, b) => S.sec[b].ts - S.sec[a].ts).slice(0, 250);
+    const sec = Object.fromEntries(secKeys.map(k => [k, S.sec[k]]));
+    const seenKeys = Object.keys(S.seen).sort((a, b) => S.seen[b].ts - S.seen[a].ts).slice(0, 600);
+    const seen = Object.fromEntries(seenKeys.map(k => [k, S.seen[k]]));
+    const data = {filters: S.filters, preset: S.preset, settings: S.settings, blocks: S.blocks.slice(-24), sec, seen,
+      pf: {...S.pf, eq: S.pf.eq.slice(-400), hist: S.pf.hist.slice(-300)}, ledger: S.ledger.slice(-300),
+      ui: {sort: S.ui.sort, onlyPass: S.ui.onlyPass, tab: S.ui.tab}};
+    localStorage.setItem(storeKey(S.mode), JSON.stringify(data));
+  } catch (e) {}
+}
+let saveT; const saveSoon = () => { clearTimeout(saveT); saveT = setTimeout(save, 400); };
+function loadState(mode) {
+  const s = freshState(mode);
+  try {
+    const d = JSON.parse(localStorage.getItem(storeKey(mode)) || 'null');
+    if (d) {
+      Object.assign(s.filters, d.filters || {}); s.preset = d.preset || s.preset;
+      Object.assign(s.settings, d.settings || {});
+      s.settings.trade = {...freshState().settings.trade, ...(d.settings?.trade || {})};
+      s.settings.auto = {...freshState().settings.auto, ...(d.settings?.auto || {})};
+      s.blocks = d.blocks || []; s.sec = d.sec || {}; s.seen = d.seen || {};
+      s.pf = {...s.pf, ...(d.pf || {})}; s.ledger = d.ledger || [];
+      Object.assign(s.ui, d.ui || {});
+    }
+  } catch (e) {}
+  return s;
+}
+
+/* ---------- normaliseren van DexScreener-paren ---------- */
+function normPair(p) {
+  const b = p.baseToken || {}; if (!b.address || !p.chainId) return null;
+  const price = +p.priceUsd; if (!price) return null;
+  const tx = p.txns || {}, v = p.volume || {}, c = p.priceChange || {};
+  return {
+    key: keyOf(p.chainId, b.address), chain: p.chainId, addr: b.address, pair: p.pairAddress, dex: p.dexId || '',
+    sym: b.symbol || '?', name: b.name || '', quote: p.quoteToken?.symbol || '',
+    icon: safeUrl(p.info?.imageUrl), url: safeUrl(p.url), price,
+    liq: p.liquidity?.usd || 0, v24: v.h24 || 0, v6: v.h6 || 0, v1: v.h1 || 0,
+    b24: tx.h24?.buys || 0, s24: tx.h24?.sells || 0, b1: tx.h1?.buys || 0, s1: tx.h1?.sells || 0,
+    c5: c.m5 ?? 0, c1: c.h1 ?? 0, c6: c.h6 ?? 0, c24: c.h24 ?? 0,
+    fdv: p.fdv || 0, mcap: p.marketCap || p.fdv || 0, created: p.pairCreatedAt || Date.now(),
+    web: (p.info?.websites || []).length, soc: (p.info?.socials || []).length, boost: p.boosts?.active || 0, ts: Date.now()
+  };
+}
+function bestPerToken(pairs, wanted) {
+  const best = new Map();
+  for (const p of pairs) {
+    const t = normPair(p); if (!t) continue;
+    if (wanted && !wanted.has(t.key)) continue;
+    const o = best.get(t.key); if (!o || t.liq > o.liq) best.set(t.key, t);
+  }
+  return best;
+}
+async function fetchPairsFor(keys) {
+  const byChain = {};
+  for (const k of keys) { const [c, ...a] = k.split(':'); (byChain[c] ||= []).push(a.join(':')); }
+  const jobs = [];
+  for (const [c, addrs] of Object.entries(byChain))
+    for (let i = 0; i < addrs.length; i += 30)
+      jobs.push(jget(`${DS}/tokens/v1/${encodeURIComponent(c)}/${addrs.slice(i, i + 30).map(encodeURIComponent).join(',')}`));
+  const res = await Promise.allSettled(jobs);
+  const pairs = res.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value);
+  if (jobs.length && !pairs.length && res.every(r => r.status === 'rejected')) throw new Error('DexScreener niet bereikbaar');
+  return bestPerToken(pairs, new Set(keys));
+}
+async function liveScan() {
+  const lists = await Promise.allSettled([
+    jget(DS + '/token-profiles/latest/v1'), jget(DS + '/token-boosts/latest/v1'), jget(DS + '/token-boosts/top/v1')]);
+  if (lists.every(l => l.status === 'rejected')) throw new Error('DexScreener niet bereikbaar');
+  const keys = new Set();
+  for (const l of lists) if (l.status === 'fulfilled' && Array.isArray(l.value))
+    for (const x of l.value) if (x.chainId && x.tokenAddress) keys.add(keyOf(x.chainId, x.tokenAddress));
+  for (const w of S.settings.watch) keys.add(keyOf(w.chain, w.addr));
+  let extra = new Map();
+  if (S.settings.query.trim()) {
+    try {
+      const r = await jget(DS + '/latest/dex/search?q=' + encodeURIComponent(S.settings.query.trim()));
+      extra = bestPerToken(r.pairs || []);
+    } catch (e) {}
+  }
+  const found = await fetchPairsFor([...keys]);
+  for (const [k, t] of extra) if (!found.has(k)) found.set(k, t);
+  return [...found.values()];
+}
+
+/* ---------- risico: heuristieken op DexScreener-data + externe audits ---------- */
+function heuristics(t) {
+  const out = []; const ageH = (t.ts - t.created) / 36e5; const add = (l, m) => out.push({l, t: m});
+  if (t.liq < 5000) add('bad', `Liquiditeit extreem laag (${usd(t.liq)})`);
+  else if (t.liq < 15000) add('warn', `Dunne liquiditeit (${usd(t.liq)})`);
+  if (t.s24 === 0 && t.b24 >= 20) add('bad', 'Geen enkele verkoop gezien: typisch honeypot-patroon');
+  else if (t.b24 >= 100 && t.s24 / (t.b24 + t.s24) < 0.12) add('warn', 'Opvallend weinig verkopen t.o.v. kopen');
+  if (ageH < 1) add('warn', 'Pool is jonger dan 1 uur');
+  if (t.liq > 0 && t.v24 / t.liq > 60) add('warn', `Volume is ${(t.v24 / t.liq).toFixed(0)}× de liquiditeit: mogelijke wash trading`);
+  if (t.mcap > 0 && t.liq / t.mcap < 0.01) add('warn', 'Liquiditeit is minder dan 1% van de marktcap');
+  if (t.c1 < -50) add('bad', `Koers ${t.c1.toFixed(0)}% in 1 uur: dump of rug bezig`);
+  if (t.c24 > 1500) add('warn', `Parabolische pump (+${t.c24.toFixed(0)}% in 24u)`);
+  const peak = S.seen[t.key]?.peakLiq;
+  if (peak && t.liq < peak * 0.4) add('bad', `Liquiditeit ${Math.round((1 - t.liq / peak) * 100)}% onder de piek: pool wordt leeggehaald`);
+  if (!t.web && !t.soc) add('info', 'Geen website of socials bij DexScreener');
+  return out;
+}
+function riskOf(t) {
+  const items = heuristics(t); const s = S.sec[t.key]; let metrics = {}, checked = false;
+  if (s) { items.push(...s.items); metrics = s.metrics || {}; checked = s.ok; }
+  const verdict = items.some(i => i.l === 'bad') ? 'bad' : items.some(i => i.l === 'warn') ? 'warn' : checked ? 'ok' : 'unknown';
+  return {items, verdict, checked, metrics, pending: !s && !!S.pending[t.key]};
+}
+function scoreOf(t, risk) {
+  const ageH = (t.ts - t.created) / 36e5, tot = t.b24 + t.s24, bs = tot ? t.b24 / tot : .5;
+  const lg = (x, lo, hi) => clamp(Math.log10(Math.max(x, 1) / lo) / Math.log10(hi / lo), 0, 1);
+  let s = 25 * lg(t.liq, 5e3, 5e5) + 15 * lg(t.v24, 1e4, 2e6) + 10 * lg(tot, 50, 5000);
+  s += 10 * (t.c1 >= 0 ? clamp(1 - Math.abs(t.c1 - 8) / 80, .2, 1) : clamp(1 + t.c1 / 40, 0, 1));
+  s += ageH < 1 ? 2 : ageH < 6 ? 5 : ageH < 168 ? 10 : 8;
+  s += (t.web ? 5 : 0) + (t.soc ? 5 : 0);
+  s += 10 * clamp(1 - Math.abs(bs - .5) / .3, 0, 1);
+  s += 10 * (t.mcap ? clamp((t.liq / t.mcap) / 0.05, 0, 1) : .4);
+  if (risk.verdict === 'bad') s = Math.min(s, 15); else if (risk.verdict === 'warn') s -= 12;
+  return Math.round(clamp(s, 0, 100));
+}
+function evaluate(t, o = {}) {
+  const f = S.filters, fails = [], F = (ok, m) => { if (!ok) fails.push(m); };
+  const ageH = (t.ts - t.created) / 36e5, tot = t.b24 + t.s24, bs = tot ? t.b24 / tot * 100 : 50;
+  F(!f.chains.length || f.chains.includes(t.chain), 'Keten uitgesloten');
+  F(t.liq >= f.minLiq, `Liq < ${usd(f.minLiq, 0)}`);
+  F(t.v24 >= f.minVol24, `Vol < ${usd(f.minVol24, 0)}`);
+  F(tot >= f.minTx24, `< ${f.minTx24} tx`);
+  F(ageH >= f.minAgeH, `Jonger dan ${f.minAgeH}u`);
+  F(!f.maxAgeH || ageH <= f.maxAgeH, `Ouder dan ${f.maxAgeH}u`);
+  F(!f.minMcap || t.mcap >= f.minMcap, `MCap < ${usd(f.minMcap, 0)}`);
+  F(!f.maxMcap || t.mcap <= f.maxMcap, `MCap > ${usd(f.maxMcap, 0)}`);
+  F(t.c1 >= f.minCh1, `1u < ${f.minCh1}%`);
+  F(!f.maxCh24 || t.c24 <= f.maxCh24, `24u > ${f.maxCh24}%`);
+  F(bs >= f.minBuy && bs <= f.maxBuy, `Koopaandeel ${bs.toFixed(0)}%`);
+  F(!t.mcap || (t.liq / t.mcap * 100) >= f.minLiqMcap, 'Liq/mcap laag');
+  F(!f.maxVolLiq || t.v24 / Math.max(t.liq, 1) <= f.maxVolLiq, 'Volume/liq te hoog');
+  F(!f.needSocial || t.web || t.soc, 'Geen socials');
+  const marketOk = fails.length === 0;
+  const risk = riskOf(t); const score = scoreOf(t, risk);
+  F(score >= f.minScore, `Score ${score} < ${f.minScore}`);
+  if (f.secMode !== 'off' && !o.skipSec) {
+    const m = risk.metrics, s = S.sec[t.key];
+    if (!s) F(f.secMode !== 'strict', risk.pending ? 'Wordt gecontroleerd' : 'Nog niet gecontroleerd');
+    else {
+      const bad = risk.items.find(i => i.l === 'bad');
+      F(risk.verdict !== 'bad', bad ? bad.t : 'Rode vlag');
+      if (f.secMode === 'strict') { F(risk.verdict !== 'warn', 'Waarschuwingen'); F(risk.checked, 'Audit niet beschikbaar'); }
+      F(m.buyTax == null || m.buyTax <= f.maxTax, `Buy tax ${m.buyTax}%`);
+      F(m.sellTax == null || m.sellTax <= f.maxTax, `Sell tax ${m.sellTax}%`);
+      F(m.topPct == null || m.topPct <= f.maxTop, `Top holder ${(m.topPct || 0).toFixed(0)}%`);
+      F(!f.minLpLock || m.lpLock == null ? true : m.lpLock >= f.minLpLock, `LP lock ${(m.lpLock || 0).toFixed(0)}%`);
+      if (f.minLpLock && m.lpLock == null && f.secMode === 'strict') F(false, 'LP-lock onbekend');
+      F(!f.noMint || !m.mintable, 'Mint mogelijk');
+      F(!f.noOwnerRisk || !m.ownerRisk, 'Owner-risico');
+    }
+  }
+  return {pass: fails.length === 0, marketOk, fails, risk, score};
+}
+
+/* ---------- security checks (honeypot.is, GoPlus, RugCheck) ---------- */
+const BURN = /dead|burn|null|0x0{30}|1nc1nerator/i;
+function holderStats(list, t) {
+  if (!Array.isArray(list)) return {};
+  let top = 0, top10 = 0;
+  const pair = (t.pair || '').toLowerCase();
+  const real = list.filter(h => {
+    const a = String(h.address || h.account || '').toLowerCase();
+    return !(h.is_locked == 1 || BURN.test(a) || BURN.test(h.tag || '') || /pool|pair|uniswap|pancake|raydium|orca|lock|vault|bonding/i.test(h.tag || '') || a === pair);
+  });
+  const ps = real.map(h => +h.percent * 100).filter(x => isFinite(x)).sort((a, b) => b - a);
+  top = ps[0] ?? 0; top10 = ps.slice(0, 10).reduce((a, b) => a + b, 0);
+  return {topPct: top, top10Pct: top10};
+}
+async function secCheck(t) {
+  const ch = CHAINS[t.chain];
+  const res = {ts: Date.now(), ok: false, items: [], metrics: {}, src: []};
+  const I = (l, m) => res.items.push({l, t: m}), M = res.metrics;
+  if (!ch) { I('info', `Geen audit-bron voor keten "${t.chain}": alleen markt-heuristieken`); return res; }
+  if (ch.evm) {
+    const [hp, gp] = await Promise.allSettled([
+      jget(`https://api.honeypot.is/v2/IsHoneypot?address=${t.addr}&chainID=${ch.id}`, 20000),
+      jget(`https://api.gopluslabs.io/api/v1/token_security/${ch.id}?contract_addresses=${t.addr}`, 15000)]);
+    if (hp.status === 'fulfilled' && hp.value?.honeypotResult) {
+      const d = hp.value; res.src.push('honeypot.is'); res.ok = true;
+      if (d.honeypotResult.isHoneypot) { M.honeypot = true; I('bad', 'Honeypot: ' + (d.honeypotResult.honeypotReason || 'verkopen is onmogelijk')); }
+      else if (d.simulationSuccess === false) I('warn', 'Koop/verkoop-simulatie is mislukt (honeypot.is)');
+      else I('ok', 'Koop/verkoop-simulatie geslaagd (honeypot.is)');
+      const sim = d.simulationResult;
+      if (sim) {
+        M.buyTax = +sim.buyTax || 0; M.sellTax = +sim.sellTax || 0;
+        I(M.sellTax > 20 || M.buyTax > 20 ? 'bad' : M.sellTax > 8 || M.buyTax > 8 ? 'warn' : 'ok', `Tax: koop ${M.buyTax.toFixed(1)}% / verkoop ${M.sellTax.toFixed(1)}%`);
+      }
+      if (d.contractCode?.openSource === false) I('warn', 'Contract is niet open source');
+      if (d.contractCode?.isProxy) I('warn', 'Proxy-contract: logica kan worden vervangen');
+      const risk = d.summary?.risk;
+      if (['high', 'very_high', 'honeypot'].includes(risk)) I('bad', `honeypot.is risico-niveau: ${risk}`);
+      else if (risk === 'medium') I('warn', 'honeypot.is risico-niveau: medium');
+      for (const fl of (d.summary?.flags || d.flags || []).slice(0, 4)) I('warn', fl.description || fl.flag || String(fl));
+      const ha = d.holderAnalysis;
+      if (ha && +ha.holders > 0 && +ha.failed > 0 && +ha.successful === 0) I('bad', 'Alle gesimuleerde holders konden niet verkopen');
+      else if (ha && +ha.siphoned > 0) I('warn', `${ha.siphoned} holders konden niet volledig verkopen`);
+    } else if (hp.status === 'rejected') I('info', 'honeypot.is: geen resultaat (' + hp.reason.message + ')');
+    if (gp.status === 'fulfilled' && gp.value?.result) {
+      const r = gp.value.result[String(t.addr).toLowerCase()];
+      if (r) {
+        res.src.push('GoPlus'); res.ok = true; const on = x => x === '1' || x === 1;
+        if (on(r.is_honeypot)) { M.honeypot = true; I('bad', 'Honeypot (GoPlus)'); }
+        if (on(r.cannot_sell_all)) I('bad', 'Je kunt niet alles verkopen');
+        if (on(r.cannot_buy)) I('bad', 'Kopen is geblokkeerd');
+        if (on(r.hidden_owner)) { M.ownerRisk = true; I('bad', 'Verborgen eigenaar'); }
+        if (on(r.can_take_back_ownership)) { M.ownerRisk = true; I('bad', 'Eigenaar kan eigendom terugpakken'); }
+        if (on(r.owner_change_balance)) { M.ownerRisk = true; I('bad', 'Eigenaar kan saldi aanpassen'); }
+        if (on(r.selfdestruct)) I('bad', 'Contract kan zichzelf vernietigen');
+        if (on(r.personal_slippage_modifiable)) I('bad', 'Tax per wallet aan te passen');
+        if (+r.honeypot_with_same_creator > 0) I('bad', `Maker heeft ${r.honeypot_with_same_creator} eerdere honeypot(s) gemaakt`);
+        if (on(r.is_mintable)) { M.mintable = true; I('warn', 'Nieuwe tokens kunnen worden bijgemaakt (mint)'); }
+        if (on(r.transfer_pausable)) I('warn', 'Transfers kunnen worden gepauzeerd');
+        if (on(r.slippage_modifiable)) I('warn', 'Tax kan door eigenaar worden aangepast');
+        if (on(r.trading_cooldown)) I('warn', 'Trading cooldown actief');
+        if (on(r.is_blacklisted)) I('warn', 'Blacklist-functie aanwezig');
+        if (r.is_open_source === '0') I('warn', 'Broncode niet geverifieerd');
+        if (on(r.is_proxy)) I('warn', 'Proxy-contract');
+        if (r.is_in_dex === '0') I('warn', 'Niet gevonden in een DEX-pool');
+        if (M.buyTax == null && r.buy_tax !== '' && r.buy_tax != null) M.buyTax = +r.buy_tax * 100;
+        if (M.sellTax == null && r.sell_tax !== '' && r.sell_tax != null) M.sellTax = +r.sell_tax * 100;
+        if (r.creator_percent && +r.creator_percent * 100 > 10) I('warn', `Maker houdt ${(+r.creator_percent * 100).toFixed(1)}% vast`);
+        const hs = holderStats(r.holders, t); if (hs.topPct != null) { M.topPct = hs.topPct; M.top10Pct = hs.top10Pct;
+          I(hs.topPct > 30 ? 'warn' : 'ok', `Grootste holder ${hs.topPct.toFixed(1)}% (top 10: ${hs.top10Pct.toFixed(0)}%)`); }
+        if (Array.isArray(r.lp_holders) && r.lp_holders.length) {
+          const locked = r.lp_holders.filter(h => h.is_locked == 1 || BURN.test(h.address || '') || /burn|dead|lock/i.test(h.tag || ''))
+            .reduce((a, h) => a + (+h.percent || 0), 0) * 100;
+          M.lpLock = clamp(locked, 0, 100);
+          I(M.lpLock >= 70 ? 'ok' : M.lpLock >= 20 ? 'warn' : 'bad', `LP vergrendeld of verbrand: ${M.lpLock.toFixed(0)}%`);
+        }
+        if (+r.holder_count) M.holders = +r.holder_count;
+        if (r.trust_list === '1') I('ok', 'Op de GoPlus vertrouwde lijst');
+      } else I('info', 'GoPlus kent dit token nog niet');
+    } else if (gp.status === 'rejected') I('info', 'GoPlus: geen resultaat (' + gp.reason.message + ')');
+  } else {
+    const [gp, rc] = await Promise.allSettled([
+      jget(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${t.addr}`, 15000),
+      jget(`https://api.rugcheck.xyz/v1/tokens/${t.addr}/report/summary`, 15000)]);
+    if (gp.status === 'fulfilled' && gp.value?.result?.[t.addr]) {
+      const r = gp.value.result[t.addr]; res.src.push('GoPlus'); res.ok = true; const st = x => x && (x.status === '1' || x === '1');
+      if (st(r.mintable)) { M.mintable = true; I('bad', 'Mint authority actief: supply kan worden uitgebreid'); }
+      if (st(r.freezable)) { M.ownerRisk = true; I('bad', 'Freeze authority actief: wallets kunnen worden bevroren'); }
+      if (st(r.closable)) { M.ownerRisk = true; I('bad', 'Token-account kan worden gesloten'); }
+      if (st(r.balance_mutable_authority)) { M.ownerRisk = true; I('bad', 'Saldi kunnen door een authority worden aangepast'); }
+      if (st(r.non_transferable)) { M.honeypot = true; I('bad', 'Token is niet overdraagbaar'); }
+      if (r.default_account_state === '2') I('bad', 'Nieuwe accounts starten bevroren');
+      if (st(r.transfer_fee_upgradable)) I('warn', 'Transfer fee kan worden aangepast');
+      if (Array.isArray(r.transfer_hook) && r.transfer_hook.length) I('warn', 'Transfer hook actief');
+      if (st(r.metadata_mutable)) I('info', 'Metadata kan worden aangepast');
+      const hs = holderStats(r.holders, t);
+      if (hs.topPct != null) { M.topPct = hs.topPct; M.top10Pct = hs.top10Pct;
+        I(hs.topPct > 30 ? 'warn' : 'ok', `Grootste holder ${hs.topPct.toFixed(1)}% (top 10: ${hs.top10Pct.toFixed(0)}%)`); }
+      const burn = (r.dex || []).map(d => +d.burn_percent).filter(x => isFinite(x));
+      if (burn.length) { M.lpLock = clamp(Math.max(...burn), 0, 100); I(M.lpLock >= 70 ? 'ok' : M.lpLock >= 20 ? 'warn' : 'info', `LP verbrand: ${M.lpLock.toFixed(0)}%`); }
+      if (+r.holder_count) M.holders = +r.holder_count;
+      if (r.trusted_token === 1 || r.trusted_token === '1') I('ok', 'Vertrouwd token (GoPlus)');
+    } else if (gp.status === 'rejected') I('info', 'GoPlus: geen resultaat (' + gp.reason.message + ')');
+    if (rc.status === 'fulfilled' && rc.value && (rc.value.risks || rc.value.score != null)) {
+      const d = rc.value; res.src.push('RugCheck'); res.ok = true;
+      if (d.rugged) I('bad', 'RugCheck: token is gerugd');
+      const risks = d.risks || [];
+      for (const k of risks.filter(x => x.level === 'danger').slice(0, 5)) I('bad', `RugCheck: ${k.name}${k.value ? ' (' + k.value + ')' : ''}`);
+      for (const k of risks.filter(x => x.level === 'warn').slice(0, 4)) I('warn', `RugCheck: ${k.name}${k.value ? ' (' + k.value + ')' : ''}`);
+      if (!risks.some(x => x.level === 'danger' || x.level === 'warn')) I('ok', 'RugCheck: geen risico\'s gevonden');
+      if (M.lpLock == null && d.lpLockedPct != null) { M.lpLock = clamp(+d.lpLockedPct, 0, 100); }
+    } else if (rc.status === 'rejected') I('info', 'RugCheck: geen resultaat (' + rc.reason.message + ')');
+  }
+  if (!res.ok) I('info', 'Geen enkele auditbron gaf een resultaat voor dit token');
+  return res;
+}
+async function runSec(tokens, concurrency = 3) {
+  const q = tokens.filter(t => !S.sec[t.key] || Date.now() - S.sec[t.key].ts > SEC_TTL).filter(t => !S.pending[t.key]);
+  q.forEach(t => S.pending[t.key] = 1);
+  let i = 0;
+  const worker = async () => {
+    while (i < q.length) {
+      const t = q[i++];
+      try { S.sec[t.key] = S.mode === 'demo' ? Demo.sec(t) : await secCheck(t); }
+      catch (e) { S.sec[t.key] = {ts: Date.now(), ok: false, items: [{l: 'info', t: 'Check mislukt: ' + e.message}], metrics: {}, src: []}; }
+      delete S.pending[t.key]; render();
+    }
+  };
+  await Promise.all(Array.from({length: Math.min(concurrency, q.length)}, worker));
+  saveSoon();
+}
+
+/* ---------- scan en blokken ---------- */
+function noteSeen(t) {
+  const s = S.seen[t.key] ||= {first: Date.now(), peakLiq: 0, ts: 0};
+  s.peakLiq = Math.max(s.peakLiq, t.liq); s.ts = Date.now();
+}
+async function scan() {
+  if (S.scanning) return; S.scanning = true; updateTop(); render();
+  try {
+    let toks;
+    try { toks = S.mode === 'demo' ? Demo.scan() : await liveScan(); }
+    catch (e) {
+      if (S.mode === 'live' && !S.blocks.length) { toast('Live-API niet bereikbaar. Demo-modus gestart met voorbeelddata.', 'bad'); S.scanning = false; await switchMode('demo', true); return; }
+      throw e;
+    }
+    if (!toks.length) throw new Error('Geen tokens ontvangen');
+    toks.forEach(t => { noteSeen(t); S.tokens[t.key] = t; });
+    // blok samenstellen: de 40 beste op marktscore
+    const ranked = toks.map(t => ({t, s: evaluate(t, {skipSec: true})})).sort((a, b) => b.s.score - a.s.score);
+    const top = ranked.slice(0, 40).map(x => x.t);
+    if (S.filters.secMode !== 'off') {
+      const need = ranked.filter(x => x.s.marketOk && !(S.sec[x.t.key] && Date.now() - S.sec[x.t.key].ts < SEC_TTL)).slice(0, S.settings.secPerScan).map(x => x.t);
+      setStatus(`Beveiligingschecks voor ${need.length} tokens…`);
+      await Promise.race([runSec(need), sleep(28000)]);
+    }
+    await mineBlock(top, toks.length);
+    if (S.settings.auto.on) await autoTrade();
+    await markPortfolio();
+    lastScanInfo = '';
+  } catch (e) {
+    lastScanInfo = 'Scan mislukt: ' + e.message; toast(lastScanInfo, 'bad');
+  } finally {
+    S.scanning = false; nextScanAt = Date.now() + S.settings.scanSec * 1000; nextRefreshAt = Date.now() + S.settings.refreshSec * 1000;
+    updateTop(); render(); saveSoon();
+  }
+}
+async function mineBlock(tokens, total) {
+  const prev = S.blocks.length ? S.blocks.at(-1).hash : ZERO, ts = Date.now();
+  const keys = tokens.map(t => t.key), merkle = await sha256(keys.join('|'));
+  const {hash, nonce} = await mine(prev + ts + merkle, '00');
+  const h = (S.blocks.at(-1)?.h ?? 0) + 1;
+  const passed = tokens.filter(t => evaluate(t).pass).length;
+  S.blocks.push({h, hash, prev, ts, merkle, nonce, total, passed, snap: tokens});
+  if (S.blocks.length > 24) S.blocks.shift();
+  S.ui.sel = null;
+  toast(`Blok #${h} gemined: ${passed} van ${tokens.length} tokens gevalideerd`, passed ? 'good' : '');
+}
+async function verifyChain(list, kind) {
+  let prev = null;
+  for (const b of list) {
+    if (prev && b.prev !== prev.hash) return {ok: false, at: b.h};
+    const payload = kind === 'scan' ? b.prev + b.ts + b.merkle + b.nonce : b.prev + b.ts + JSON.stringify(b.tx) + b.nonce;
+    if (await sha256(payload) !== b.hash) return {ok: false, at: b.h};
+    if (kind === 'scan' && await sha256(b.snap.map(t => t.key).join('|')) !== b.merkle) return {ok: false, at: b.h};
+    prev = b;
+  }
+  return {ok: true, n: list.length};
+}
+
+/* ---------- paper trading ---------- */
+const gas = c => GAS[c] ?? .1;
+function quoteBuy(t, amount, m = {}) {
+  const R = Math.max(t.liq, 1) / 2, impact = amount / (R + amount);
+  const fee = amount * DEX_FEE + gas(t.chain), net = Math.max(0, amount - fee);
+  const tax = (m.buyTax || 0) / 100, exec = t.price * (1 + amount / R);
+  return {amount, fee, impact, exec, tax, qty: net * (1 - tax) / exec};
+}
+function quoteSell(pos, t, frac, m = {}) {
+  const qty = pos.qty * frac, gross = qty * t.price, R = Math.max(t.liq, 1) / 2, impact = gross / (R + gross);
+  const exec = t.price * R / (R + gross), tax = (m.sellTax || 0) / 100;
+  const out = qty * exec * (1 - tax), fee = out * DEX_FEE + gas(t.chain);
+  return {qty, impact, exec, tax, fee, net: Math.max(0, out - fee)};
+}
+const equity = () => S.pf.cash + S.pf.pos.reduce((a, p) => a + p.qty * p.last, 0);
+async function ledgerAdd(tx) {
+  const prev = S.ledger.length ? S.ledger.at(-1).hash : ZERO, ts = Date.now();
+  const {hash, nonce} = await mine(prev + ts + JSON.stringify(tx), '0');
+  S.ledger.push({h: (S.ledger.at(-1)?.h ?? -1) + 1, ts, prev, hash, nonce, tx});
+}
+async function ensureGenesis() {
+  if (!S.ledger.length) await ledgerAdd({type: 'genesis', usd: S.pf.start, note: 'Startkapitaal'});
+}
+async function doBuy(key, amount, o = {}) {
+  const t = S.tokens[key] || findToken(key); if (!t) return {ok: false, msg: 'Token niet gevonden'};
+  amount = +amount; if (!(amount > 0)) return {ok: false, msg: 'Voer een bedrag in'};
+  if (amount > S.pf.cash + 1e-9) return {ok: false, msg: 'Onvoldoende saldo'};
+  const risk = riskOf(t);
+  if (risk.metrics.honeypot) return {ok: false, msg: 'Geblokkeerd: dit token is een honeypot, je zou niet kunnen verkopen'};
+  const q = quoteBuy(t, amount, risk.metrics);
+  if (q.qty <= 0) return {ok: false, msg: 'Bedrag te klein na kosten'};
+  S.pf.cash -= amount; S.pf.fees += q.fee;
+  const existing = S.pf.pos.find(p => p.key === key);
+  if (existing) {
+    existing.entry = (existing.entry * existing.qty + q.exec * q.qty) / (existing.qty + q.qty);
+    existing.qty += q.qty; existing.cost += amount; existing.last = t.price; existing.peak = Math.max(existing.peak, t.price);
+  } else {
+    S.pf.pos.push({id: Date.now() + Math.random(), key, chain: t.chain, addr: t.addr, pair: t.pair, sym: t.sym, name: t.name, icon: t.icon, url: t.url,
+      qty: q.qty, cost: amount, entry: q.exec, last: t.price, peak: t.price, liq: t.liq, openedAt: Date.now(),
+      tp: +o.tp || 0, sl: +o.sl || 0, trail: +o.trail || 0, auto: !!o.auto});
+  }
+  await ledgerAdd({type: 'buy', key, sym: t.sym, chain: t.chain, usd: amount, qty: q.qty, price: q.exec, fee: q.fee, impact: q.impact, auto: !!o.auto});
+  saveSoon();
+  return {ok: true, msg: `Gekocht: ${t.sym} voor ${money(amount)} (impact ${(q.impact * 100).toFixed(2)}%)`};
+}
+async function doSell(posId, frac, reason = 'Handmatig') {
+  const p = S.pf.pos.find(x => x.id === posId); if (!p) return {ok: false, msg: 'Positie niet gevonden'};
+  const t = S.tokens[p.key] || {price: p.last, liq: p.liq, chain: p.chain};
+  const m = S.sec[p.key]?.metrics || {};
+  const q = quoteSell(p, t, frac, m), costPart = p.cost * frac, pnl = q.net - costPart;
+  S.pf.cash += q.net; S.pf.fees += q.fee;
+  S.pf.hist.push({id: Date.now() + Math.random(), key: p.key, sym: p.sym, chain: p.chain, openedAt: p.openedAt, closedAt: Date.now(), cost: costPart, proceeds: q.net, pnl, pct: costPart ? pnl / costPart * 100 : 0, reason, auto: p.auto, frac});
+  await ledgerAdd({type: 'sell', key: p.key, sym: p.sym, chain: p.chain, usd: q.net, qty: q.qty, price: q.exec, fee: q.fee, impact: q.impact, pnl, reason, auto: p.auto});
+  if (frac >= 0.999) S.pf.pos = S.pf.pos.filter(x => x.id !== posId);
+  else { p.qty -= q.qty; p.cost -= costPart; }
+  saveSoon();
+  return {ok: true, msg: `Verkocht: ${p.sym} ${Math.round(frac * 100)}% voor ${money(q.net)} (${pnl >= 0 ? '+' : ''}${money(pnl)})`, pnl};
+}
+async function markPortfolio() {
+  for (const p of [...S.pf.pos]) {
+    const t = S.tokens[p.key]; if (!t) continue;
+    p.last = t.price; p.liq = t.liq; p.peak = Math.max(p.peak, t.price);
+    const ret = (t.price / p.entry - 1) * 100, peakLiq = S.seen[p.key]?.peakLiq;
+    let reason = null;
+    if (peakLiq && t.liq < peakLiq * 0.4) reason = 'Rug-alarm: liquiditeit weggehaald';
+    else if (p.tp && ret >= p.tp) reason = 'Take profit';
+    else if (p.sl && ret <= -p.sl) reason = 'Stop loss';
+    else if (p.trail && t.price <= p.peak * (1 - p.trail / 100) && p.peak > p.entry) reason = 'Trailing stop';
+    if (reason) { const r = await doSell(p.id, 1, reason); toast(`${reason}: ${r.msg}`, r.pnl >= 0 ? 'good' : 'bad'); }
+  }
+  S.pf.eq.push({t: Date.now(), v: equity()}); if (S.pf.eq.length > 600) S.pf.eq.shift();
+}
+async function autoTrade() {
+  const a = S.settings.auto, last = S.blocks.at(-1); if (!last) return;
+  const cands = last.snap.map(t => ({t, e: evaluate(t)})).filter(x => x.e.pass && (x.e.risk.verdict === 'ok' || (a.allowWarn && x.e.risk.verdict === 'warn') || S.filters.secMode === 'off'))
+    .sort((x, y) => y.e.score - x.e.score);
+  for (const {t} of cands) {
+    if (S.pf.pos.length >= a.max || S.pf.cash < a.size) break;
+    if (S.pf.pos.some(p => p.key === t.key) || S.pf.hist.some(h => h.key === t.key)) continue;
+    const r = await doBuy(t.key, a.size, {tp: S.settings.trade.tp, sl: S.settings.trade.sl, trail: S.settings.trade.trail, auto: true});
+    if (r.ok) toast('Auto-trade: ' + r.msg, 'good');
+  }
+}
+async function refreshPrices() {
+  if (S.refreshing || S.scanning) return; S.refreshing = true;
+  try {
+    const keys = new Set(S.pf.pos.map(p => p.key));
+    S.blocks.at(-1)?.snap.forEach(t => keys.add(t.key));
+    if (S.ui.drawer) keys.add(S.ui.drawer);
+    let m;
+    if (S.mode === 'demo') m = Demo.refresh([...keys]);
+    else { try { m = await fetchPairsFor([...keys].filter(k => !k.startsWith('?'))); } catch (e) { m = new Map(); } }
+    for (const [k, t] of m) { noteSeen(t); S.tokens[k] = t; }
+    await markPortfolio();
+  } finally { S.refreshing = false; nextRefreshAt = Date.now() + S.settings.refreshSec * 1000; render(); updateDrawerLive(); saveSoon(); }
+}
+function findToken(key) {
+  for (let i = S.blocks.length - 1; i >= 0; i--) { const t = S.blocks[i].snap.find(x => x.key === key); if (t) return t; }
+  const p = S.pf.pos.find(x => x.key === key); return p ? {key, chain: p.chain, addr: p.addr, pair: p.pair, sym: p.sym, name: p.name, icon: p.icon, url: p.url, price: p.last, liq: p.liq, v24: 0, v1: 0, b24: 0, s24: 0, c1: 0, c24: 0, c5: 0, c6: 0, mcap: 0, fdv: 0, created: p.openedAt, ts: Date.now(), web: 0, soc: 0, dex: ''} : null;
+}
+
+/* ---------- demo-modus (gesimuleerde markt) ---------- */
+const Demo = (() => {
+  let seed = (Date.now() % 1e9) | 0, uni = [], n = 0;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  const norm = () => { let u = 0; for (let i = 0; i < 6; i++) u += rnd(); return (u - 3) / Math.sqrt(.5); };
+  const W = ['PEPE','MOON','WIF','BONK','FROG','CHAD','APE','NEKO','DOGE','SHIB','BOBO','TURBO','GIGA','WOJAK','MEOW','HODL','PUMP','SIGMA','ZEN','KAI','RIZZ','LORE','BASED','COPE','FOMO','YOLO','DEGEN','MOG','TOSHI','ELON'];
+  const SUF = ['', '', 'INU', 'AI', '2.0', 'COIN', 'X', 'CAT', 'DAO'];
+  const chains = ['solana','solana','solana','base','base','ethereum','bsc','arbitrum'];
+  const hex = n => Array.from({length: n}, () => '0123456789abcdef'[Math.floor(rnd() * 16)]).join('');
+  const b58 = n => Array.from({length: n}, () => '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'[Math.floor(rnd() * 58)]).join('');
+  function spawn() {
+    const chain = pick(chains), word = pick(W), suf = pick(SUF), addr = chain === 'solana' ? b58(44) : '0x' + hex(40);
+    const liq = Math.exp(Math.log(40000) + norm() * 1.1), ageH = Math.exp(Math.log(10) + norm() * 1.4);
+    const v24 = liq * (.3 + rnd() * 9), price = Math.exp(Math.log(.0008) + norm() * 3), tx = Math.max(10, Math.round(v24 / (60 + rnd() * 160)));
+    const hp = rnd() < .09, buyShare = hp ? .97 + rnd() * .03 : .38 + rnd() * .3;
+    const f = {hp, mint: rnd() < .25, owner: rnd() < .1, tax: rnd() < .15 ? 8 + rnd() * 25 : rnd() < .3 ? 1 + rnd() * 3 : 0, lock: rnd() < .6 ? 70 + rnd() * 30 : rnd() * 15, top: 3 + rnd() * 40, rug: rnd() < .08};
+    const sup = 1e9 * (.1 + rnd());
+    return {f, t: {key: keyOf(chain, addr), chain, addr, pair: chain === 'solana' ? b58(44) : '0x' + hex(40), dex: pick(['raydium','uniswap','pancakeswap','pumpswap','aerodrome']),
+      sym: word + (suf && /^[A-Z]/.test(suf) ? '' : '') + (suf.length <= 3 && suf ? suf : ''), name: word[0] + word.slice(1).toLowerCase() + (suf ? ' ' + suf : ' Token'),
+      quote: chain === 'solana' ? 'SOL' : 'WETH', icon: '', url: '', price, liq, v24, v6: v24 * .3, v1: v24 * .06,
+      b24: Math.round(tx * buyShare), s24: hp ? 0 : Math.round(tx * (1 - buyShare)), b1: 0, s1: 0,
+      c5: norm() * 2, c1: norm() * 9, c6: norm() * 20, c24: norm() * 40 + (rnd() < .1 ? 300 * rnd() : 0), fdv: price * sup, mcap: price * sup,
+      created: Date.now() - ageH * 36e5, web: rnd() < .55 ? 1 : 0, soc: rnd() < .65 ? 2 : 0, boost: 0, ts: Date.now()}};
+  }
+  function step(u) {
+    const t = u.t; t.ts = Date.now();
+    let g = Math.exp(norm() * .035 + .001);
+    if (u.f.rug && !u.rugged && rnd() < .05) { u.rugged = true; g = .15; t.liq *= .08; t.c1 = -85; t.c24 = -90; }
+    t.price *= g; t.mcap = t.fdv = t.fdv * g; t.liq *= u.rugged ? 1 : Math.exp(norm() * .01);
+    t.c5 = (g - 1) * 100; t.c1 = u.rugged ? t.c1 : t.c1 * .9 + (g - 1) * 100 * 2; t.c24 += (g - 1) * 40;
+    t.v24 *= 1 + (rnd() - .45) * .02; t.b24 += Math.round(rnd() * 6); if (!u.f.hp) t.s24 += Math.round(rnd() * 5);
+  }
+  return {
+    scan() {
+      for (let i = 0; i < 8; i++) uni.push(spawn());
+      if (uni.length > 70) uni.splice(0, uni.length - 70);
+      uni.forEach(step); n++;
+      return uni.slice(-30).map(u => ({...u.t}));
+    },
+    refresh(keys) {
+      const m = new Map(); uni.forEach(step);
+      for (const u of uni) if (keys.includes(u.t.key)) m.set(u.t.key, {...u.t});
+      return m;
+    },
+    sec(t) {
+      const u = uni.find(x => x.t.key === t.key); const res = {ts: Date.now(), ok: true, items: [], metrics: {}, src: ['demo']};
+      if (!u) { res.ok = false; res.items.push({l: 'info', t: 'Demo: onbekend token'}); return res; }
+      const f = u.f, I = (l, m) => res.items.push({l, t: m}), M = res.metrics;
+      if (f.hp) { M.honeypot = true; I('bad', 'Honeypot: verkopen is onmogelijk (demo)'); } else I('ok', 'Koop/verkoop-simulatie geslaagd (demo)');
+      M.buyTax = f.hp ? 0 : f.tax; M.sellTax = f.hp ? 99 : f.tax;
+      I(f.tax > 20 ? 'bad' : f.tax > 8 ? 'warn' : 'ok', `Tax: koop ${M.buyTax.toFixed(1)}% / verkoop ${M.sellTax.toFixed(1)}%`);
+      if (f.mint) { M.mintable = true; I('warn', 'Nieuwe tokens kunnen worden bijgemaakt (mint)'); }
+      if (f.owner) { M.ownerRisk = true; I('bad', 'Verborgen eigenaar'); }
+      M.topPct = f.top; I(f.top > 30 ? 'warn' : 'ok', `Grootste holder ${f.top.toFixed(1)}%`);
+      M.lpLock = f.lock; I(f.lock >= 70 ? 'ok' : f.lock >= 20 ? 'warn' : 'bad', `LP vergrendeld of verbrand: ${f.lock.toFixed(0)}%`);
+      return res;
+    }
+  };
+})();
+
+/* ---------- UI: kop ---------- */
+function setStatus(txt) { $('#status').innerHTML = `<span class="dot busy"></span>${esc(txt)}`; }
+function updateTop() {
+  const left = Math.max(0, Math.round((nextScanAt - Date.now()) / 1000));
+  const live = S.mode === 'live';
+  if (S.scanning) $('#status').innerHTML = `<span class="dot busy"></span>Scannen…`;
+  else if (lastScanInfo) $('#status').innerHTML = `<span class="dot off"></span>${esc(lastScanInfo)}`;
+  else $('#status').innerHTML = `<span class="dot ${S.settings.autoScan ? '' : 'off'}"></span>${live ? 'Live' : 'Demo'} · ${S.blocks.length ? 'blok #' + S.blocks.at(-1).h : 'nog geen blok'} · ${S.settings.autoScan ? 'volgende in ' + left + 's' : 'auto-scan uit'}`;
+  const pend = $('#pend-bar'); if (pend) pend.style.width = (S.scanning ? 100 : clamp(100 - left / S.settings.scanSec * 100, 0, 100)) + '%';
+  const pl = $('#pend-left'); if (pl) pl.textContent = S.scanning ? 'minen…' : S.settings.autoScan ? left + 's' : 'gepauzeerd';
+  const eq = equity(), pnl = eq - S.pf.start;
+  $('#wallet').innerHTML = `<div><span>Saldo</span><b class="num">${money(S.pf.cash)}</b></div><div><span>Waarde</span><b class="num">${money(eq)}</b></div><div><span>Winst/verlies</span><b class="num ${pnl >= 0 ? 'up' : 'dn'}">${pnl >= 0 ? '+' : ''}${money(pnl)}</b></div>`;
+  $('#m-live').setAttribute('aria-pressed', live); $('#m-demo').setAttribute('aria-pressed', !live);
+  $('#scanbtn').disabled = S.scanning;
+  $('#banner').innerHTML = S.mode === 'demo' ? `<div class="banner"><b>Demo-modus.</b> Dit zijn gesimuleerde tokens en geen echte markt. ${S.fallback ? 'De live API was niet bereikbaar vanuit deze omgeving. ' : ''}Open <span class="mono">index.html</span> in je eigen browser voor live DexScreener-data.<button class="btn sm" data-act="mode" data-v="live">Probeer live</button></div>` : '';
+}
+
+/* ---------- UI: filters ---------- */
+function buildFilters() {
+  const f = S.filters;
+  const grp = FIELD_GROUPS.map(([title, fields]) => `<h3>${title}</h3><div class="fgrid">${fields.map(([k, lab, step]) =>
+    `<div class="fld"><label for="f-${k}">${lab}</label><input type="number" id="f-${k}" data-f="${k}" step="${step}" value="${f[k]}"></div>`).join('')}
+    ${title === 'Leeftijd en momentum' ? `<label class="chk"><input type="checkbox" data-f="needSocial" id="f-needSocial" ${f.needSocial ? 'checked' : ''}> Website of socials verplicht</label>` : ''}
+    ${title === 'Beveiliging' ? `
+      <div class="fld wide"><label for="f-secMode">Honeypot- en rugcheck</label>
+        <select id="f-secMode" data-f="secMode"><option value="strict">Streng: alleen geverifieerd schoon</option><option value="normal">Normaal: geen rode vlaggen</option><option value="off">Uit</option></select></div>
+      <label class="chk"><input type="checkbox" data-f="noMint" id="f-noMint" ${f.noMint ? 'checked' : ''}> Geen mint-functie</label>
+      <label class="chk"><input type="checkbox" data-f="noOwnerRisk" id="f-noOwnerRisk" ${f.noOwnerRisk ? 'checked' : ''}> Geen owner/freeze-risico</label>` : ''}</div>`).join('');
+  $('#filters').innerHTML = `<h3>Preset</h3><div class="presets">${Object.entries(PRESETS).map(([k, p]) => `<button class="btn sm" data-act="preset" data-v="${k}" aria-pressed="${S.preset === k}">${p.label}</button>`).join('')}</div>
+    <h3>Ketens</h3><div class="chips" id="chainchips"></div>${grp}
+    <p class="note" style="margin-top:14px">Filters werken direct op alle blokken. Honeypot- en rugchecks draaien automatisch voor tokens die de marktfilters halen.</p>`;
+  $('#f-secMode').value = f.secMode; renderChainChips();
+}
+function renderChainChips() {
+  const seen = new Set(Object.keys(CHAINS)); S.blocks.forEach(b => b.snap.forEach(t => seen.add(t.chain)));
+  $('#chainchips').innerHTML = [...seen].map(c => `<button class="chip" data-act="chain" data-v="${esc(c)}" aria-pressed="${S.filters.chains.includes(c)}">${esc(c)}</button>`).join('') +
+    (S.filters.chains.length ? '<button class="chip" data-act="chain" data-v="*">alle</button>' : '');
+}
+function filterChanged() { saveSoon(); render(); clearTimeout(filterChanged.t); filterChanged.t = setTimeout(queueVisibleSec, 900); }
+function queueVisibleSec() {
+  if (S.filters.secMode === 'off' || S.scanning) return;
+  const b = selectedBlock(); if (!b) return;
+  const need = b.snap.filter(t => evaluate(t, {skipSec: true}).marketOk).filter(t => !S.sec[t.key]).slice(0, S.settings.secPerScan);
+  if (need.length) runSec(need);
+}
+
+/* ---------- UI: scanner ---------- */
+const selectedBlock = () => S.ui.sel == null ? S.blocks.at(-1) : S.blocks.find(b => b.h === S.ui.sel) || S.blocks.at(-1);
+function ring(score) {
+  const c = score >= 70 ? 'var(--good)' : score >= 45 ? 'var(--warn)' : 'var(--bad)', C = 2 * Math.PI * 17;
+  return `<div class="ring" title="Score ${score}/100"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="17" fill="none" stroke="var(--line)" stroke-width="4"/><circle cx="22" cy="22" r="17" fill="none" stroke="${c}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C * score / 100} ${C}"/></svg><b>${score}</b></div>`;
+}
+const iconHtml = t => `<div class="ico">${t.icon ? `<img src="${esc(t.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${esc((t.sym || '?')[0])}</div>`;
+function verdictPill(r) {
+  if (r.metrics.honeypot) return '<span class="pill bad">Honeypot</span>';
+  if (r.pending) return '<span class="pill unk">Controleren…</span>';
+  return {ok: '<span class="pill ok">Veilig gecontroleerd</span>', warn: '<span class="pill warn">Let op</span>', bad: '<span class="pill bad">Gevaar</span>', unknown: '<span class="pill unk">Niet gecontroleerd</span>'}[r.verdict];
+}
+function cardHtml(t, ev, head) {
+  const tot = t.b24 + t.s24, bp = tot ? t.b24 / tot * 100 : 50, ageH = (t.ts - t.created) / 36e5, live = S.tokens[t.key];
+  const since = live && live.ts !== t.ts && t.price ? (live.price / t.price - 1) * 100 : null;
+  const held = S.pf.pos.some(p => p.key === t.key);
+  return `<article class="card ${ev.pass ? 'pass' : 'fail'}">
+    <div class="c-top">${iconHtml(t)}<div class="c-id"><b>${esc(t.sym)}</b><small>${chainBadge(t.chain)}<span>${esc(t.dex)}</span><span title="${esc(t.addr)}">${esc(shortA(t.addr))}</span></small></div>${ring(ev.score)}</div>
+    <div class="c-price"><b>${px(t.price)}</b><span>${pct(t.c1)} <span class="mute">1u</span> · ${pct(t.c24, 0)} <span class="mute">24u</span></span></div>
+    <div class="kv"><div><span>Liq</span><b>${usd(t.liq)}</b></div><div><span>Vol 24u</span><b>${usd(t.v24)}</b></div><div><span>MCap</span><b>${usd(t.mcap)}</b></div><div><span>Leeftijd</span><b>${ageStr(ageH)}</b></div></div>
+    <div><div class="bs-bar" title="Kopen ${t.b24} / verkopen ${t.s24}"><i style="width:${bp}%"></i></div><div class="bs-lab"><span>${t.b24} kopen</span><span>${t.s24} verkopen</span></div></div>
+    <div class="pills">${ev.pass ? '<span class="pill ok">Gevalideerd</span>' : '<span class="pill unk">Afgekeurd</span>'}${verdictPill(ev.risk)}${held ? '<span class="pill ok">In bezit</span>' : ''}</div>
+    ${!ev.pass ? `<div class="fails">${ev.fails.slice(0, 3).map(x => `<span>${esc(x)}</span>`).join('')}${ev.fails.length > 3 ? `<span>+${ev.fails.length - 3}</span>` : ''}</div>` : ''}
+    ${since != null && !head ? `<div class="since">Sinds dit blok: ${pct(since)}</div>` : ''}
+    <div class="c-act"><button class="btn sm" data-act="check" data-k="${esc(t.key)}">Check</button><button class="btn sm" data-act="open" data-k="${esc(t.key)}">Details</button><button class="btn sm good" data-act="open" data-k="${esc(t.key)}">Koop</button></div>
+  </article>`;
+}
+function renderScanner() {
+  const sel = selectedBlock(), head = S.blocks.at(-1);
+  // keten
+  const strip = $('#strip'), atEnd = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 40;
+  strip.innerHTML = S.blocks.map((b, i) => `${i ? '<div class="lnk"></div>' : ''}<button class="blk" data-act="block" data-v="${b.h}" aria-current="${b === sel}">
+      <div class="bh"><span>BLOK #${b.h}</span>${b === head ? '<span class="head-tag">HEAD</span>' : ''}</div><div class="hs">${shortH(b.hash)}</div><div class="pv">← ${shortH(b.prev)}</div>
+      <div class="bs"><span>${b.snap.length} tx</span><span class="up">${b.snap.filter(t => evaluate(t).pass).length} ✓</span></div><div class="bt">${hhmmss(b.ts)} · nonce ${b.nonce}</div></button>`).join('') +
+    `${S.blocks.length ? '<div class="lnk"></div>' : ''}<div class="blk pending"><div class="bh"><span>BLOK #${(head?.h || 0) + 1}</span></div><div class="pv">wacht op scan</div><div class="bt" id="pend-left"></div><div class="bar"><i id="pend-bar"></i></div></div>`;
+  if (atEnd) strip.scrollLeft = strip.scrollWidth;
+  $('#chainnote').textContent = S.blocks.length ? `${S.blocks.length} ${S.blocks.length === 1 ? 'blok' : 'blokken'} · proof-of-work met 00-prefix` : '';
+  const bd = $('#bdetail');
+  if (sel) bd.innerHTML = `<div><span>Hoogte</span><code>${sel.h}${sel === head ? ' (head)' : ''}</code></div><div><span>Blok-hash</span><code>${sel.hash}</code></div><div><span>Vorige hash</span><code>${sel.prev}</code></div><div><span>Merkle-root (tokens)</span><code>${sel.merkle}</code></div>
+    <div><span>Gescand / opgenomen</span><code>${sel.total} / ${sel.snap.length}</code></div><div><span>Tijd · nonce</span><code>${new Date(sel.ts).toLocaleString('nl-NL')} · ${sel.nonce}</code></div>
+    <div><span>Integriteit</span><code id="verify-out"><button class="btn sm" data-act="verify">Controleer keten</button></code></div>`;
+  else bd.innerHTML = '<div class="note">Eerste blok wordt gemined zodra de scan klaar is.</div>';
+  // tokens
+  const q = S.ui.q.trim().toLowerCase();
+  let rows = (sel?.snap || []).map(t => ({t, ev: evaluate(t)}));
+  const nPass = rows.filter(r => r.ev.pass).length, nAll = rows.length;
+  if (S.ui.onlyPass) rows = rows.filter(r => r.ev.pass);
+  if (q) rows = rows.filter(r => (r.t.sym + ' ' + r.t.name + ' ' + r.t.addr).toLowerCase().includes(q));
+  const sorters = {score: (a, b) => b.ev.score - a.ev.score, liq: (a, b) => b.t.liq - a.t.liq, v24: (a, b) => b.t.v24 - a.t.v24, age: (a, b) => b.t.created - a.t.created, c1: (a, b) => b.t.c1 - a.t.c1};
+  rows.sort((a, b) => (b.ev.pass - a.ev.pass) || sorters[S.ui.sort](a, b));
+  $('#count').textContent = sel ? `${nPass} van ${nAll} tokens gevalideerd door de filters${S.ui.onlyPass ? ' · alleen gevalideerd getoond' : ''}` : '';
+  $('#grid').innerHTML = rows.length ? rows.map(r => cardHtml(r.t, r.ev, sel === head)).join('') :
+    `<div class="empty" style="grid-column:1/-1">${nAll ? 'Geen tokens voldoen aan je filters in dit blok. Versoepel een filter of kies de Degen-preset.' : (S.scanning ? 'Eerste scan loopt…' : 'Nog geen data. Klik op Scan nu.')}</div>`;
+}
+
+/* ---------- UI: portfolio ---------- */
+function spark(points) {
+  if (points.length < 2) return '<div class="empty">De waardegrafiek vult zich na een paar verversingen.</div>';
+  const W = 700, H = 120, P = 6, v = points.map(p => p.v), lo = Math.min(...v, S.pf.start), hi = Math.max(...v, S.pf.start), r = hi - lo || 1;
+  const X = i => P + i / (points.length - 1) * (W - 2 * P), Y = y => H - P - (y - lo) / r * (H - 2 * P);
+  const line = points.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`).join('');
+  const up = v.at(-1) >= S.pf.start, c = up ? 'var(--good)' : 'var(--bad)';
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Waarde van het portfolio"><line x1="0" x2="${W}" y1="${Y(S.pf.start)}" y2="${Y(S.pf.start)}" stroke="var(--line)" stroke-dasharray="4 4"/><path d="${line}L${X(points.length - 1)} ${H}L${X(0)} ${H}Z" fill="${c}" opacity=".12"/><path d="${line}" fill="none" stroke="${c}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function renderPortfolio() {
+  const eq = equity(), pnl = eq - S.pf.start, open = S.pf.pos.reduce((a, p) => a + p.qty * p.last - p.cost, 0);
+  const real = S.pf.hist.reduce((a, h) => a + h.pnl, 0), wins = S.pf.hist.filter(h => h.pnl > 0).length, n = S.pf.hist.length;
+  $('#v-portfolio').innerHTML = `
+    <div class="tiles">
+      <div class="tile"><span>Totale waarde</span><b class="num">${money(eq)}</b></div>
+      <div class="tile"><span>Rendement</span><b class="num ${pnl >= 0 ? 'up' : 'dn'}">${pnl >= 0 ? '+' : ''}${(pnl / S.pf.start * 100).toFixed(2)}%</b></div>
+      <div class="tile"><span>Open resultaat</span><b class="num ${open >= 0 ? 'up' : 'dn'}">${money(open)}</b></div>
+      <div class="tile"><span>Gerealiseerd</span><b class="num ${real >= 0 ? 'up' : 'dn'}">${money(real)}</b></div>
+      <div class="tile"><span>Win-ratio</span><b class="num">${n ? Math.round(wins / n * 100) + '%' : '–'}<small class="mute" style="font:12px var(--f-mono)"> ${wins}/${n}</small></b></div>
+      <div class="tile"><span>Kosten betaald</span><b class="num">${money(S.pf.fees)}</b></div>
+    </div>
+    <div class="panel"><h2>Waardeverloop</h2>${spark(S.pf.eq)}</div>
+    <div class="panel"><h2>Open posities (${S.pf.pos.length})</h2><div class="tbl">${S.pf.pos.length ? `<table><thead><tr><th>Token</th><th class="r">Inleg</th><th class="r">Instap</th><th class="r">Nu</th><th class="r">Waarde</th><th class="r">Resultaat</th><th>TP / SL / Trail</th><th>Verkoop</th></tr></thead><tbody>
+      ${S.pf.pos.map(p => { const val = p.qty * p.last, r = (val / p.cost - 1) * 100; return `<tr><td><b>${esc(p.sym)}</b> ${chainBadge(p.chain)} ${p.auto ? '<span class="tag gen">AUTO</span>' : ''}</td><td class="r mono">${money(p.cost)}</td><td class="r mono">${px(p.entry)}</td><td class="r mono">${px(p.last)}</td><td class="r mono">${money(val)}</td><td class="r mono">${pct(r)}</td>
+        <td class="mono">${p.tp ? '+' + p.tp + '%' : '–'} / ${p.sl ? '-' + p.sl + '%' : '–'} / ${p.trail ? p.trail + '%' : '–'}</td>
+        <td><button class="btn sm" data-act="sell" data-id="${p.id}" data-f="0.5">50%</button> <button class="btn sm bad" data-act="sell" data-id="${p.id}" data-f="1">Alles</button> <button class="btn sm" data-act="open" data-k="${esc(p.key)}">Details</button></td></tr>`; }).join('')}</tbody></table>` : '<div class="empty">Geen open posities. Koop een gevalideerd token via de scanner of zet auto-trade aan bij Instellingen.</div>'}</div></div>
+    <div class="panel"><h2>Gesloten trades (${n})</h2><div class="tbl">${n ? `<table><thead><tr><th>Sluiting</th><th>Token</th><th class="r">Inleg</th><th class="r">Opbrengst</th><th class="r">Resultaat</th><th>Reden</th></tr></thead><tbody>
+      ${[...S.pf.hist].reverse().slice(0, 60).map(h => `<tr><td class="mono">${new Date(h.closedAt).toLocaleString('nl-NL')}</td><td><b>${esc(h.sym)}</b> ${chainBadge(h.chain)}</td><td class="r mono">${money(h.cost)}</td><td class="r mono">${money(h.proceeds)}</td><td class="r mono">${pct(h.pct)} <span class="mute">${money(h.pnl)}</span></td><td>${esc(h.reason)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nog geen gesloten trades.</div>'}</div></div>`;
+}
+function renderLedger() {
+  $('#v-ledger').innerHTML = `<div class="panel"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><h2>Grootboek van paper trades</h2><div class="note">Elke trade is een blok met een hash van het vorige blok. Als iemand een oude trade aanpast, klopt de keten niet meer.</div></div><span id="lverify"><button class="btn sm" data-act="lverify">Controleer keten</button></span></div></div>
+    <div class="ledger">${[...S.ledger].reverse().slice(0, 150).map(b => { const x = b.tx;
+      return `<div class="lb"><div class="rail"><i></i><u></u></div><div class="body"><div class="l1"><b>BLOK #${b.h} <span class="tag ${x.type === 'buy' ? 'buy' : x.type === 'sell' ? 'sell' : 'gen'}">${x.type === 'buy' ? 'KOOP' : x.type === 'sell' ? 'VERKOOP' : 'GENESIS'}</span> ${esc(x.sym || '')} ${x.chain ? chainBadge(x.chain) : ''}</b><span class="mono mute">${new Date(b.ts).toLocaleString('nl-NL')}</span></div>
+        <div class="mono" style="font-size:12px">${x.type === 'genesis' ? esc(x.note) + ' ' + money(x.usd) : `${money(x.usd)} · ${qtyFmt(+x.qty)} stuks @ ${px(x.price)} · kosten ${money(x.fee)} · impact ${(x.impact * 100).toFixed(2)}%${x.pnl != null ? ` · resultaat <span class="${x.pnl >= 0 ? 'up' : 'dn'}">${money(x.pnl)}</span>` : ''}${x.reason ? ' · ' + esc(x.reason) : ''}${x.auto ? ' · auto' : ''}`}</div>
+        <code>hash ${b.hash}</code><code>vorige ${b.prev}</code></div></div>`; }).join('')}</div>`;
+}
+function renderSettings() {
+  const s = S.settings, a = s.auto, t = s.trade;
+  const num = (id, lab, val, step = 1, hint = '') => `<div class="fld"><label for="${id}">${lab}</label><input type="number" id="${id}" value="${val}" step="${step}">${hint ? `<span class="note">${hint}</span>` : ''}</div>`;
+  $('#v-settings').innerHTML = `
+    <div class="two"><div class="panel"><h2>Auto-trader</h2><div class="fgrid">
+      <label class="chk"><input type="checkbox" id="a-on" ${a.on ? 'checked' : ''}> Koop automatisch gevalideerde tokens (alleen paper)</label>
+      ${num('a-size', 'Bedrag per trade ($)', a.size, 25)}${num('a-max', 'Max. open posities', a.max)}
+      <label class="chk"><input type="checkbox" id="a-warn" ${a.allowWarn ? 'checked' : ''}> Ook tokens met waarschuwingen (geen rode vlaggen)</label>
+    </div><p class="note">De auto-trader koopt alleen tokens die alle filters halen en niet eerder zijn verhandeld. Een token met honeypot-uitslag wordt nooit gekocht.</p></div>
+    <div class="panel"><h2>Standaard exit-regels</h2><div class="fgrid">${num('t-tp', 'Take profit (%)', t.tp, 5, '0 = uit')}${num('t-sl', 'Stop loss (%)', t.sl, 5, '0 = uit')}${num('t-trail', 'Trailing stop (%)', t.trail, 5, '0 = uit')}${num('t-size', 'Standaard handmatig bedrag ($)', t.size, 25)}</div></div></div>
+    <div class="two"><div class="panel"><h2>Scanner</h2><div class="fgrid">${num('s-scan', 'Scan-interval (sec)', s.scanSec, 10)}${num('s-ref', 'Koers verversen (sec)', s.refreshSec, 5)}${num('s-sec', 'Beveiligingschecks per scan', s.secPerScan, 1)}
+      <div class="fld wide"><label for="s-query">Extra zoekterm op DexScreener (optioneel)</label><input type="text" id="s-query" value="${esc(s.query)}" placeholder="bijv. pump, base, AI"></div>
+      <div class="fld wide"><label for="s-watch">Watchlist (één per regel: keten:tokenadres)</label><textarea id="s-watch" placeholder="solana:So1111…&#10;base:0x4200…">${esc(s.watch.map(w => w.chain + ':' + w.addr).join('\n'))}</textarea></div></div></div>
+    <div class="panel"><h2>Portfolio</h2><div class="fgrid">${num('s-cash', 'Startkapitaal ($)', s.startCash, 1000)}</div>
+      <p class="note">Een nieuw startkapitaal geldt na een reset.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn bad" data-act="reset" id="resetbtn">Reset portfolio en grootboek</button><button class="btn" data-act="clearsec">Wis check-cache</button></div></div></div>
+    <div class="panel"><h2>Hoe de checks werken</h2><p class="note" style="max-width:80ch">Per token combineert ChainScout de DexScreener-cijfers (liquiditeit, verkopen, leeftijd, pump-patronen, liquiditeit die verdwijnt) met externe audits: honeypot.is en GoPlus voor EVM-ketens, GoPlus en RugCheck voor Solana. Dat levert tax, mint-rechten, verborgen eigenaar, LP-lock en holder-concentratie op. Dit is hulp bij het sorteren en geen garantie. Nieuwe tokens kunnen binnen minuten veranderen. Alle trades zijn gesimuleerd: prijsimpact volgt uit de pool-liquiditeit, daarbij komen 0,3% swapfee, gas en de gemeten tax.</p></div>`;
+  const bind = (id, fn) => { const el = $('#' + id); el.addEventListener('input', () => { fn(el); saveSoon(); }); };
+  bind('a-on', e => a.on = e.checked); bind('a-warn', e => a.allowWarn = e.checked);
+  bind('a-size', e => a.size = +e.value || 0); bind('a-max', e => a.max = +e.value || 0);
+  bind('t-tp', e => t.tp = +e.value || 0); bind('t-sl', e => t.sl = +e.value || 0); bind('t-trail', e => t.trail = +e.value || 0); bind('t-size', e => t.size = +e.value || 0);
+  bind('s-scan', e => s.scanSec = clamp(+e.value || 90, 20, 3600)); bind('s-ref', e => s.refreshSec = clamp(+e.value || 20, 5, 600)); bind('s-sec', e => s.secPerScan = clamp(+e.value || 0, 0, 40));
+  bind('s-query', e => s.query = e.value); bind('s-cash', e => s.startCash = Math.max(100, +e.value || 10000));
+  bind('s-watch', e => s.watch = e.value.split('\n').map(l => l.trim()).filter(l => l.includes(':')).map(l => { const i = l.indexOf(':'); return {chain: l.slice(0, i).trim().toLowerCase(), addr: l.slice(i + 1).trim()}; }).filter(w => w.addr));
+}
+
+/* ---------- UI: detail-lade met handelsvenster ---------- */
+function renderDrawer() {
+  const root = $('#drawer-root'); const key = S.ui.drawer;
+  if (!key) { root.innerHTML = ''; return; }
+  const t = S.tokens[key] || findToken(key); if (!t) { root.innerHTML = ''; return; }
+  const ev = evaluate(t), r = ev.risk, pos = S.pf.pos.find(p => p.key === key), tr = S.settings.trade;
+  const ageH = (Date.now() - t.created) / 36e5;
+  root.innerHTML = `<div class="scrim" data-act="close"></div><aside class="drawer" role="dialog" aria-label="${esc(t.sym)} details">
+    <div class="d-head">${iconHtml(t)}<div><h2>${esc(t.sym)} <small class="mute" style="font:12px var(--f-body)">${esc(t.name)}</small></h2><div class="mono mute" style="font-size:11px">${chainBadge(t.chain)} ${esc(t.dex)} · ${esc(shortA(t.addr))} <button class="btn sm" data-act="copy" data-v="${esc(t.addr)}">kopieer</button></div></div>${ring(ev.score)}<button class="btn sm x" data-act="close" aria-label="Sluiten">Sluit</button></div>
+    <div class="c-price"><b id="d-price" style="font:600 22px var(--f-mono)">${px(t.price)}</b><span id="d-ch">${pct(t.c1)} 1u · ${pct(t.c24, 0)} 24u</span></div>
+    <div class="kv" style="grid-template-columns:repeat(3,1fr)"><div><span>Liquiditeit</span><b>${usd(t.liq)}</b></div><div><span>Volume 24u</span><b>${usd(t.v24)}</b></div><div><span>MCap</span><b>${usd(t.mcap)}</b></div><div><span>Leeftijd</span><b>${ageStr(ageH)}</b></div><div><span>Kopen/verkopen</span><b>${t.b24}/${t.s24}</b></div><div><span>Holders</span><b>${r.metrics.holders ? r.metrics.holders.toLocaleString('nl-NL') : '–'}</b></div></div>
+    <div class="d-sec"><h3>Honeypot- en rugcheck</h3><div class="pills">${verdictPill(r)}${ev.pass ? '<span class="pill ok">Gevalideerd</span>' : '<span class="pill unk">Afgekeurd</span>'}<button class="btn sm" data-act="recheck" data-k="${esc(key)}">Opnieuw checken</button></div>
+      <ul class="risk">${r.items.length ? r.items.map(i => `<li class="${i.l}">${esc(i.t)}</li>`).join('') : '<li>Nog geen check uitgevoerd. Klik op Opnieuw checken.</li>'}</ul>
+      ${S.sec[key] ? `<div class="note">Bronnen: ${esc((S.sec[key].src || []).join(', ') || 'geen')} · ${hhmmss(S.sec[key].ts)}</div>` : ''}
+      ${!ev.pass ? `<div class="fails">${ev.fails.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''}</div>
+    ${pos ? `<div class="ticket"><h3 style="font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute)">Jouw positie</h3><div class="q" id="d-pos"></div><div class="amts"><button class="btn sm" data-act="sell" data-id="${pos.id}" data-f="0.25">25%</button><button class="btn sm" data-act="sell" data-id="${pos.id}" data-f="0.5">50%</button><button class="btn sm bad" data-act="sell" data-id="${pos.id}" data-f="1">Alles verkopen</button></div></div>` : ''}
+    <div class="ticket"><h3 style="font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute)">Paper trade: koop</h3>
+      <div class="amts">${[100, 250, 500, 1000].map(v => `<button class="btn sm" data-act="amt" data-v="${v}">$${v}</button>`).join('')}<button class="btn sm" data-act="amt" data-v="max">Max</button></div>
+      <div class="fgrid"><div class="fld"><label for="t-amt">Bedrag ($)</label><input type="number" id="t-amt" value="${Math.min(tr.size, Math.floor(S.pf.cash))}" min="0" step="25"></div><div class="fld"><label for="x-tp">Take profit (%)</label><input type="number" id="x-tp" value="${tr.tp}"></div><div class="fld"><label for="x-sl">Stop loss (%)</label><input type="number" id="x-sl" value="${tr.sl}"></div><div class="fld"><label for="x-trail">Trailing stop (%)</label><input type="number" id="x-trail" value="${tr.trail}"></div></div>
+      <div class="q" id="d-quote"></div>
+      <button class="btn good" id="d-buy" data-act="buy" data-k="${esc(key)}">Koop</button>
+      <div class="note" id="d-msg"></div></div>
+    <div class="d-sec"><h3>Grafiek</h3>${S.ui.chart && t.pair ? `<iframe class="chart" title="DexScreener grafiek" src="https://dexscreener.com/${encodeURIComponent(t.chain)}/${encodeURIComponent(t.pair)}?embed=1&theme=dark&trades=0&info=0"></iframe>` : '<button class="btn sm" data-act="chart">Toon grafiek</button>'}
+      ${t.url ? `<a href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" class="note">Open op DexScreener</a>` : ''}</div>
+  </aside>`;
+  $('#t-amt').addEventListener('input', updateQuote); updateQuote(); updateDrawerLive();
+}
+function updateQuote() {
+  const key = S.ui.drawer, t = S.tokens[key] || findToken(key); if (!t || !$('#d-quote')) return;
+  const amt = +$('#t-amt').value || 0, m = riskOf(t).metrics, q = quoteBuy(t, amt, m);
+  $('#d-quote').innerHTML = `<span>Prijsimpact</span><span class="${q.impact > .05 ? 'dn' : ''}">${(q.impact * 100).toFixed(2)}%</span><span>Uitvoeringsprijs</span><span>${px(q.exec)}</span><span>Kosten (swap + gas)</span><span>${money(q.fee)}</span><span>Buy tax</span><span>${(q.tax * 100).toFixed(1)}%</span><span>Je krijgt</span><span>${qtyFmt(q.qty)} ${esc(t.sym)}</span>`;
+  const b = $('#d-buy'); b.disabled = !(amt > 0) || amt > S.pf.cash || !!m.honeypot;
+  $('#d-msg').textContent = m.honeypot ? 'Kopen is geblokkeerd: honeypot.' : amt > S.pf.cash ? `Saldo ${money(S.pf.cash)} is te laag.` : q.impact > .05 ? 'Hoge prijsimpact: de pool is klein t.o.v. je bedrag.' : '';
+}
+function updateDrawerLive() {
+  const key = S.ui.drawer; if (!key || !$('#d-price')) return;
+  const t = S.tokens[key]; if (!t) return;
+  $('#d-price').textContent = px(t.price); $('#d-ch').innerHTML = `${pct(t.c1)} 1u · ${pct(t.c24, 0)} 24u`;
+  const pos = S.pf.pos.find(p => p.key === key), el = $('#d-pos');
+  if (pos && el) { const val = pos.qty * pos.last, r = (val / pos.cost - 1) * 100; el.innerHTML = `<span>Inleg</span><span>${money(pos.cost)}</span><span>Instap</span><span>${px(pos.entry)}</span><span>Waarde nu</span><span>${money(val)}</span><span>Resultaat</span><span>${pct(r)}</span>`; }
+  updateQuote();
+}
+
+/* ---------- renderen ---------- */
+let rAF = 0;
+function render() { if (rAF) return; rAF = requestAnimationFrame(() => { rAF = 0; renderNow(); }); }
+function renderNow() {
+  updateTop(); const tab = S.ui.tab;
+  for (const id of ['scanner', 'portfolio', 'ledger', 'settings']) $('#v-' + id).hidden = id !== tab;
+  $$('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.v === tab));
+  if (tab === 'scanner') { renderScanner(); renderChainChips(); }
+  if (tab === 'portfolio') renderPortfolio();
+}
+function toast(msg, kind = '') {
+  const el = document.createElement('div'); el.className = 'toast ' + kind; el.textContent = msg; $('#toasts').append(el);
+  setTimeout(() => el.remove(), 5200);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; const a = b.dataset.act, d = b.dataset;
+  switch (a) {
+    case 'tab': S.ui.tab = d.v; if (d.v === 'ledger') renderLedger(); if (d.v === 'settings') renderSettings(); renderNow(); saveSoon(); window.scrollTo(0, 0); break;
+    case 'scan': scan(); break;
+    case 'mode': if (d.v !== S.mode) switchMode(d.v); else if (S.mode === 'demo' && b.closest('.banner')) switchMode('live'); break;
+    case 'filt': $('#filters').classList.toggle('open'); break;
+    case 'block': S.ui.sel = +d.v === S.blocks.at(-1).h ? null : +d.v; render(); break;
+    case 'preset': S.preset = d.v; Object.assign(S.filters, PRESETS[d.v].f); buildFilters(); filterChanged(); break;
+    case 'chain': {
+      const c = S.filters.chains; if (d.v === '*') c.length = 0; else { const i = c.indexOf(d.v); i >= 0 ? c.splice(i, 1) : c.push(d.v); }
+      S.preset = ''; renderChainChips(); filterChanged(); break;
+    }
+    case 'open': { S.ui.drawer = d.k; S.ui.chart = false; renderDrawer(); const t = S.tokens[d.k] || findToken(d.k); if (t && !S.sec[d.k] && !S.pending[d.k]) runSec([t], 1).then(() => S.ui.drawer === d.k && renderDrawer()); break; }
+    case 'close': S.ui.drawer = null; renderDrawer(); break;
+    case 'check': { const t = S.tokens[d.k] || findToken(d.k); if (t) { delete S.sec[d.k]; toast(`Check gestart voor ${t.sym}…`); await runSec([t], 1); } break; }
+    case 'recheck': { const t = S.tokens[d.k] || findToken(d.k); if (t) { delete S.sec[d.k]; renderDrawer(); await runSec([t], 1); renderDrawer(); } break; }
+    case 'amt': $('#t-amt').value = d.v === 'max' ? Math.floor(S.pf.cash) : d.v; updateQuote(); break;
+    case 'chart': S.ui.chart = true; renderDrawer(); break;
+    case 'copy': try { await navigator.clipboard.writeText(d.v); toast('Adres gekopieerd'); } catch (er) { toast('Kopiëren is niet gelukt', 'bad'); } break;
+    case 'buy': {
+      b.disabled = true;
+      const r = await doBuy(d.k, $('#t-amt').value, {tp: $('#x-tp').value, sl: $('#x-sl').value, trail: $('#x-trail').value});
+      toast(r.msg, r.ok ? 'good' : 'bad'); if (r.ok) { S.ui.tab === 'portfolio' && renderPortfolio(); renderDrawer(); } else b.disabled = false; render(); break;
+    }
+    case 'sell': { const r = await doSell(+d.id, +d.f); toast(r.msg, r.ok ? (r.pnl >= 0 ? 'good' : 'bad') : 'bad'); if (S.ui.drawer) renderDrawer(); render(); break; }
+    case 'verify': { const r = await verifyChain(S.blocks, 'scan'); $('#verify-out').innerHTML = r.ok ? `<span class="up">Geldig: ${r.n} blokken kloppen</span>` : `<span class="dn">Keten gebroken bij blok #${r.at}</span>`; break; }
+    case 'lverify': { const r = await verifyChain(S.ledger, 'ledger'); $('#lverify').innerHTML = r.ok ? `<span class="up">Geldig: ${r.n} blokken kloppen</span>` : `<span class="dn">Keten gebroken bij blok #${r.at}</span>`; break; }
+    case 'clearsec': S.sec = {}; toast('Check-cache gewist'); saveSoon(); break;
+    case 'reset':
+      if (b.dataset.armed) {
+        S.pf = {cash: S.settings.startCash, start: S.settings.startCash, pos: [], hist: [], eq: [], fees: 0}; S.ledger = []; await ensureGenesis();
+        saveSoon(); toast('Portfolio gereset'); renderSettings(); render();
+      } else { b.dataset.armed = 1; b.textContent = 'Zeker weten? Klik nogmaals'; setTimeout(() => { delete b.dataset.armed; b.textContent = 'Reset portfolio en grootboek'; }, 4000); }
+      break;
+  }
+});
+document.addEventListener('input', e => {
+  const el = e.target; const k = el.dataset.f; if (!k) return;
+  S.filters[k] = el.type === 'checkbox' ? el.checked : el.tagName === 'SELECT' ? el.value : (+el.value || 0);
+  S.preset = ''; $$('[data-act="preset"]').forEach(b => b.setAttribute('aria-pressed', false)); filterChanged();
+});
+$('#q').addEventListener('input', e => { S.ui.q = e.target.value; render(); });
+$('#sort').addEventListener('change', e => { S.ui.sort = e.target.value; render(); saveSoon(); });
+$('#onlypass').addEventListener('change', e => { S.ui.onlyPass = e.target.checked; render(); saveSoon(); });
+$('#autoscan').addEventListener('change', e => { S.settings.autoScan = e.target.checked; if (e.target.checked) nextScanAt = Date.now() + 2000; updateTop(); saveSoon(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.ui.drawer) { S.ui.drawer = null; renderDrawer(); } });
+
+async function switchMode(mode, fallback = false) {
+  save(); S = loadState(mode); S.fallback = fallback; localStorage.setItem('chainscout.mode', mode);
+  await ensureGenesis(); syncControls(); buildFilters(); renderDrawer(); renderNow(); nextScanAt = 0; nextRefreshAt = Date.now() + 15000;
+  if (S.ui.tab === 'ledger') renderLedger(); if (S.ui.tab === 'settings') renderSettings();
+  scan();
+}
+function syncControls() {
+  $('#sort').value = S.ui.sort; $('#onlypass').checked = S.ui.onlyPass; $('#autoscan').checked = S.settings.autoScan; $('#q').value = S.ui.q;
+}
+function tick() {
+  const now = Date.now();
+  if (!S.scanning && S.settings.autoScan && nextScanAt && now >= nextScanAt) scan();
+  else if (!S.scanning && !S.refreshing && nextRefreshAt && now >= nextRefreshAt) refreshPrices();
+  updateTop();
+}
+(async function init() {
+  let mode = 'live'; try { mode = localStorage.getItem('chainscout.mode') || 'live'; } catch (e) {}
+  S = loadState(mode === 'demo' ? 'demo' : 'live');
+  await ensureGenesis(); syncControls(); buildFilters(); renderNow();
+  if (S.ui.tab === 'ledger') renderLedger(); if (S.ui.tab === 'settings') renderSettings();
+  setInterval(tick, 1000); window.addEventListener('beforeunload', save);
+  scan();
+})();
+</script>
+</body>
+</html>
