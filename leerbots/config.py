@@ -31,6 +31,7 @@ class Settings:
 
     # Risico (de bot kan deze regels niet wegleren). Percentages van je eigen geld,
     # behalve stop_loss: die gaat over de koers. Bij 5x kost 2% koersdaling 10% van je geld.
+    risk_per_trade: float = 0.10    # max 10% van je geld verliezen als de stop-loss geraakt wordt
     min_rebalance: float = 0.10     # aanpassingen kleiner dan 10% van de max positie overslaan
     stop_loss: float = 0.02         # koers 2% onder instapprijs -> sluiten
     stop_cooldown: int = 6          # na stop-loss 6 candles niet kopen
@@ -40,6 +41,16 @@ class Settings:
     @property
     def interval_ms(self) -> int:
         return INTERVAL_MS[self.interval]
+
+    @property
+    def max_exposure(self) -> float:
+        """Grootste positie (x eigen geld) waarbij een stop-loss hoogstens risk_per_trade kost.
+
+        Verlies bij stop = positie x (koersdaling tot stop + fees en slippage bij in- en uitstappen).
+        Nooit meer dan de hefboom.
+        """
+        loss_per_x = self.stop_loss + 2 * self.cost
+        return min(self.leverage, self.risk_per_trade / loss_per_x)
 
     @property
     def funding_per_candle(self) -> float:

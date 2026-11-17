@@ -41,6 +41,11 @@ def feed(bots, candles_by_symbol, trade_from=None):
     return processed
 
 
+def _key(s):
+    """Instellingen die bepalen of opgeslagen bots nog bruikbaar zijn."""
+    return (s.interval, s.leverage, s.start_capital, getattr(s, "risk_per_trade", None), s.stop_loss)
+
+
 class App:
     def __init__(self, settings, state_dir="state", warmup=3000):
         self.s = settings
@@ -68,9 +73,7 @@ class App:
             with open(self.state_file, "rb") as f:
                 data = pickle.load(f)
             if (data.get("version") != VERSION or set(data["bots"]) != set(SYMBOLS)
-                    or any((b.s.interval, b.s.leverage, b.s.start_capital)
-                           != (self.s.interval, self.s.leverage, self.s.start_capital)
-                           for b in data["bots"].values())):
+                    or any(_key(b.s) != _key(self.s) for b in data["bots"].values())):
                 log.warning("Opgeslagen staat hoort bij een andere versie of andere instellingen; begin opnieuw.")
                 return False
             self.bots = data["bots"]

@@ -171,6 +171,26 @@ class BotTest(unittest.TestCase):
         bot = bots["BTCUSDT"]
         self.assertLessEqual(bot.portfolio.exposure(bot.last_price), s.leverage * 1.15)
 
+    def test_risk_per_trade_sizes_position(self):
+        s = Settings()  # 10% risico, stop 2%, max 5x
+        self.assertAlmostEqual(s.max_exposure, 0.10 / (0.02 + 2 * s.cost))
+        self.assertLess(s.max_exposure, s.leverage)
+        self.assertEqual(Settings(risk_per_trade=0.5).max_exposure, 5.0)  # hefboom blijft het plafond
+        self.assertAlmostEqual(Settings(risk_per_trade=0.02).max_exposure, 0.02 / (0.02 + 2 * s.cost))
+
+    def test_stop_loss_costs_at_most_risk_per_trade(self):
+        s = Settings()
+        bot = TradingBot("BTCUSDT", s)
+        for k in synthetic(80, seed=6):
+            bot.step(k, trade=False)
+        start = bot.portfolio.equity(bot.last_price)
+        bot.portfolio.rebalance(s.max_exposure, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        self.assertLessEqual(bot._loss_at_stop() / start, 0.1 + 1e-9)
+        bot.tick(bot.risk.stop_price(bot.portfolio.entry), 0)
+        loss = 1 - bot.portfolio.equity(bot.last_price) / start
+        self.assertGreater(loss, 0.09)
+        self.assertLessEqual(loss, 0.10 + 1e-9)
+
     def test_skips_duplicate_candles(self):
         bots = {"BTCUSDT": TradingBot("BTCUSDT", Settings())}
         ks = {"BTCUSDT": synthetic(3)}

@@ -48,7 +48,8 @@ def report(bots):
     print()
     print("=" * 78)
     s = next(iter(bots.values())).s
-    print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, {s.leverage:g}x hefboom")
+    print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, max {s.leverage:g}x hefboom,"
+          f" max {s.risk_per_trade:.0%} risico per trade (positie tot {s.max_exposure:.2f}x)")
     print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, funding {s.funding_8h:.2%}/8u meegerekend)")
     print("=" * 78)
     total_start = total_eq = 0.0
@@ -80,12 +81,14 @@ def main():
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS))
     ap.add_argument("--capital", type=float, default=500)
     ap.add_argument("--leverage", type=float, default=5)
+    ap.add_argument("--risk", type=float, default=10, help="max verlies per trade in %%")
     ap.add_argument("--days", type=int, default=180, help="dagen waarin getraded wordt")
     ap.add_argument("--warmup-days", type=int, default=60, help="dagen vooraf om alleen te leren")
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
-    settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage)
+    settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
+                        risk_per_trade=args.risk / 100)
     per_day = 86_400_000 // settings.interval_ms
     candles = load_candles(args.interval, (args.days + args.warmup_days) * per_day, args.offline)
     report(run(candles, args.days, settings, args.seed))

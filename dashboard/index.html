@@ -154,7 +154,7 @@ function card(b) {
   return `
   <div class="card">
     <div class="head">
-      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · ${b.leverage}x</span>
+      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · max ${b.leverage}x · ${(b.risk_per_trade * 100).toFixed(0)}% risico</span>
       <span class="pill ${b.risk.state}">${b.risk.state}</span>
       <span class="price">$${price(b.price)}</span>
     </div>
@@ -171,7 +171,7 @@ function card(b) {
     <div class="section">
       <h3>Positie</h3>
       <div class="kv">
-        <div><span>Hefboom nu</span><b>${b.exposure.toFixed(1)}x / ${b.leverage}x</b></div>
+        <div><span>Hefboom nu</span><b>${b.exposure.toFixed(1)}x / ${b.max_exposure.toFixed(1)}x</b></div>
         <div><span>Positiegrootte</span><b>${b.notional ? usd(b.notional) : "-"}</b></div>
         <div><span>Instapprijs</span><b>${b.entry ? "$" + price(b.entry) : "-"}</b></div>
         <div><span>Open resultaat</span><b class="${cls(b.unrealized)}">${b.entry ? usd(b.unrealized) + " (koers " + pct(b.unrealized_pct) + ")" : "-"}</b></div>
@@ -180,6 +180,8 @@ function card(b) {
         <div><span>Saldo</span><b>${usd(b.balance)}</b></div>
         <div><span>Trades · fees</span><b>${b.n_trades} · ${usd(b.fees)}</b></div>
         <div><span>Funding betaald</span><b>${usd(b.funding)}</b></div>
+        <div><span>Verlies bij stop</span><b class="${b.loss_at_stop ? "down" : ""}">${b.loss_at_stop ? usd(-b.loss_at_stop) + " (" + (b.loss_at_stop / b.equity * 100).toFixed(1) + "%)" : "-"}</b></div>
+        <div><span>Max risico per trade</span><b>${(b.risk_per_trade * 100).toFixed(0)}%</b></div>
       </div>
     </div>
 

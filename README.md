@@ -2,7 +2,7 @@
 
 Drie zelflerende trading-bots voor **Bitcoin, Ethereum en Solana**. Ze handelen vanzelf op live Binance-koersen, maar alleen met **nep-geld (paper trading)**. Er worden geen orders naar een beurs gestuurd en je hebt geen API-sleutels nodig.
 
-Standaard krijgt elke bot **$500** en handelt hij met maximaal **5x hefboom**, zoals op een Binance USDT-futures account. De simulatie rekent futures-fees, funding en liquidatie mee.
+Standaard krijgt elke bot **$500**, handelt hij met maximaal **5x hefboom** zoals op een Binance USDT-futures account, en riskeert hij **maximaal 10% van zijn geld per trade**. De simulatie rekent futures-fees, funding en liquidatie mee.
 
 Alles is gewone Python (3.9 of nieuwer), zonder extra pakketten.
 
@@ -17,8 +17,8 @@ Open daarna **http://localhost:8000** voor het dashboard.
 - Bij de eerste start leren de bots eerst op de laatste 3000 uurcandles (ongeveer 4 maanden). Ze traden dan nog niet. Dat opwarmen duurt ongeveer een halve minuut.
 - Daarna draaien ze live. Elk uur komt er een nieuwe candle binnen, en elke 10 seconden wordt de koers gecontroleerd voor de stop-loss.
 - Het geheugen (model, strategiescores, portemonnee) staat in `state/`. Stop je het programma met Ctrl+C en start je het later opnieuw, dan gaan de bots verder waar ze waren. Gemiste candles gebruiken ze alleen om te leren; daarover traden ze niet achteraf.
-- Opties: `--capital 500` (startgeld per bot), `--leverage 5` (hefboom, `1` = zonder), `--reset` (alles vergeten), `--interval 15m` (andere candle-grootte), `--port 8080`, `--host 0.0.0.0` (dashboard ook vanaf andere apparaten bereikbaar).
-- Verander je startgeld, hefboom of interval, dan beginnen de bots automatisch opnieuw.
+- Opties: `--capital 500` (startgeld per bot), `--leverage 5` (hefboom, `1` = zonder), `--risk 10` (max verlies per trade in %), `--reset` (alles vergeten), `--interval 15m` (andere candle-grootte), `--port 8080`, `--host 0.0.0.0` (dashboard ook vanaf andere apparaten bereikbaar).
+- Verander je startgeld, hefboom, risico of interval, dan beginnen de bots automatisch opnieuw.
 
 Voor 24/7 laat je het draaien op een pc die aan blijft, een Raspberry Pi of een kleine VPS, bijvoorbeeld met `nohup python3 run.py &`, `tmux` of een systemd-service.
 
@@ -51,10 +51,17 @@ candle ──► signalen ──► model leert bij ──► strategieën ─�
 
 **4. Strategiekiezer** (`leerbots/bandit.py`), de eigenlijke zelfleer-laag. Elke candle krijgt elke strategie een virtuele score: wat ze ná kosten verdiend zou hebben, ook als de bot haar niet volgt. Oude resultaten vervagen (discount 0,995, ongeveer 8 dagen geheugen), zodat de bot zich aanpast als de markt omslaat. Elke 6 candles kiest de bot de strategie met de hoogste *ondergrens* (gemiddelde min de onzekerheid). Is geen strategie aantoonbaar beter dan niets doen, dan blijft hij in cash. Hij wisselt ook alleen als de verwachte winst de kosten van de wissel dekt.
 
-**5. Hefboom**: de strategie bepaalt óf de bot in de munt zit; de hefboom bepaalt hoe groot. Bij 5x opent de bot met $500 een positie van $2.500. Elke 1% koersbeweging is dan 5% van je geld. Alleen long, geen shorten.
+**5. Positiegrootte, hefboom en risico per trade**: de strategie bepaalt óf de bot in de munt zit; het risico per trade bepaalt hoe groot. De bot kiest de grootste positie waarbij een geraakte stop-loss, inclusief fees en slippage, hoogstens 10% van zijn geld kost:
+
+```
+positie = 10% / (2% stop-loss + 0,14% kosten)  = 4,67x je geld   (nooit meer dan de hefboom van 5x)
+```
+
+Met $500 is dat een positie van ongeveer $2.335. Raakt de stop-loss, dan kost dat ongeveer $50. Elke 1% koersbeweging is ongeveer 4,7% van je geld. Alleen long, geen shorten.
 
 **6. Risicoregels** (`leerbots/risk.py`): deze staan buiten het lerende deel, dus de bot kan ze niet "wegleren".
-- stop-loss bij 2% koersdaling onder de instapprijs (bij 5x is dat 10% van je geld), daarna 6 candles afkoelen;
+- max 10% verlies per trade via de positiegrootte hierboven;
+- stop-loss bij 2% koersdaling onder de instapprijs, daarna 6 candles afkoelen;
 - liquidatie wordt gesimuleerd: bij 5x ongeveer 19,6% koersdaling, en dan is de inleg weg. De stop-loss moet dat voorkomen, maar bij een plotselinge koerssprong (gat) kan het toch gebeuren;
 - bij 15% verlies op een dag geen positie meer voor de rest van die dag;
 - bij 40% onder de piek stopt de bot tot je hem op het dashboard hervat;
@@ -87,6 +94,9 @@ Alle instellingen staan in `leerbots/config.py`.
   | 5x | +5,7% | +42,6% | +10,8% | -36,3% | alle drie ~40%: noodstop geraakt |
 
   Bij 5x raakten alle drie de bots de noodstop (40% onder de piek). Het totaal hing dus vooral af van geluk in de volgorde van winst en verlies. Eén periode zegt bovendien weinig.
+
+  Met 10% risico per trade (positie 4,67x, de standaard) was het resultaat +0,7% totaal (BTC +31%, ETH +7,5%, SOL -36%). Geen enkele positie kostte meer dan 9,9%, maar drie of vier verliezende trades achter elkaar is al 30 tot 40%, en alle drie de bots raakten opnieuw de noodstop. Met `--risk 2` tot `--risk 5` is de kans daarop veel kleiner.
+- Het risico per trade is een maximum zolang de koers niet springt. Opent een candle ver onder de stop-loss (een gat), dan verkoopt de bot pas tegen die lagere koers en kan het verlies groter zijn.
 - Korte candles (5 minuten) kostten in tests veel meer aan fees dan ze opleverden. Daarom is 1 uur de standaard.
 - Laat de bots eerst weken op paper draaien voordat je aan echt geld denkt. Echte handel zit er bewust niet in. Als die ooit wordt toegevoegd: gebruik API-sleutels zonder opnamerechten en alleen geld dat je kunt missen.
 

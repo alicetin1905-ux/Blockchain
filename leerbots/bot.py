@@ -121,9 +121,9 @@ class TradingBot:
             self.start_price, self.start_t = price, k["t"]
         self.risk.on_candle(k["t"], pf.equity(price))
         self.active_counts[self.active] += 1
-        target, self.risk_note = self.risk.filter(self.virt[self.active] * self.s.leverage, self.index)
+        target, self.risk_note = self.risk.filter(self.virt[self.active] * self.s.max_exposure, self.index)
         cur = pf.exposure(price)
-        if (target <= 0 and pf.qty > 0) or abs(target - cur) >= self.s.min_rebalance * self.s.leverage:
+        if (target <= 0 and pf.qty > 0) or abs(target - cur) >= self.s.min_rebalance * self.s.max_exposure:
             reason = self.risk_note or STRATEGIES[self.active][0]
             pf.rebalance(target, price, k["t"], reason, self.active, self.s.fee_rate, self.s.slippage)
 
@@ -149,6 +149,14 @@ class TradingBot:
             self.risk.trigger_stop(self.index)
         elif liq is not None and low <= liq:
             pf.liquidate(liq, t, self.active, self.s.maintenance_margin)
+
+    def _loss_at_stop(self):
+        """Wat de open positie kost (t.o.v. de instap) als de stop-loss geraakt wordt."""
+        pf = self.portfolio
+        if pf.qty <= 0:
+            return 0.0
+        exit_price = self.risk.stop_price(pf.entry) * (1 - self.s.slippage)
+        return pf.qty * (pf.entry - exit_price) + pf.qty * exit_price * self.s.fee_rate
 
     def tick(self, price, t):
         """Live koers tussen candles door: stop-loss en liquidatie direct uitvoeren."""
@@ -217,6 +225,9 @@ class TradingBot:
             "qty": pf.qty,
             "entry": pf.entry,
             "leverage": self.s.leverage,
+            "max_exposure": self.s.max_exposure,
+            "risk_per_trade": self.s.risk_per_trade,
+            "loss_at_stop": self._loss_at_stop(),
             "exposure": pf.exposure(price) if price else 0.0,
             "notional": pf.notional(price),
             "unrealized": pf.unrealized(price),
