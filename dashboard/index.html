@@ -74,7 +74,7 @@ button:hover { border-color: var(--accent); }
 </head>
 <body>
 <div class="wrap">
-  <div class="banner">PAPER TRADING: alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
+  <div class="banner">PAPER TRADING met hefboom: alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
   <header>
     <h1>Leerbots</h1>
     <span class="sub" id="meta">verbinden...</span>
@@ -145,7 +145,7 @@ function card(b) {
       <td class="${cls(s.virtual_return_pct)}">${pct(s.virtual_return_pct, 1)}</td>
     </tr>`).join("");
   const trades = b.trades.slice(0, 8).map((t) => `
-    <tr><td>${time(t.t)}</td><td class="${t.side === "KOOP" ? "up" : "down"}">${t.side}</td>
+    <tr><td>${time(t.t)}</td><td class="${t.side === "KOOP" ? "up" : "down"}">${t.side === "LIQUIDATIE" ? "<b>LIQUIDATIE</b>" : t.side}</td>
     <td>${price(t.price)}</td><td>${usd(t.usd)}</td>
     <td class="${t.pnl == null ? "muted" : cls(t.pnl)}">${t.pnl == null ? "" : usd(t.pnl)}</td>
     <td class="muted" style="text-align:left">${esc(t.reason)}</td></tr>`).join("")
@@ -154,7 +154,7 @@ function card(b) {
   return `
   <div class="card">
     <div class="head">
-      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)}</span>
+      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · ${b.leverage}x</span>
       <span class="pill ${b.risk.state}">${b.risk.state}</span>
       <span class="price">$${price(b.price)}</span>
     </div>
@@ -162,7 +162,7 @@ function card(b) {
       <span class="eq">${usd(b.equity)}</span>
       <span class="${cls(b.pnl)}">${pct(b.pnl_pct)} (${usd(b.pnl)})</span>
     </div>
-    <div class="muted">Kopen en houden sinds start: <span class="${cls(b.buy_hold_pct)}">${pct(b.buy_hold_pct)}</span>
+    <div class="muted">Kopen en houden (1x) sinds start: <span class="${cls(b.buy_hold_pct)}">${pct(b.buy_hold_pct)}</span>
       · max drawdown ${b.max_drawdown_pct.toFixed(1)}%</div>
     <canvas data-sym="${esc(b.symbol)}"></canvas>
     <div class="legend"><span><i style="background:var(--eq)"></i>bot</span><span><i style="background:var(--px)"></i>koers ${esc(b.symbol.replace("USDT", ""))}</span></div>
@@ -171,12 +171,15 @@ function card(b) {
     <div class="section">
       <h3>Positie</h3>
       <div class="kv">
-        <div><span>In de munt</span><b>${(b.exposure * 100).toFixed(0)}%</b></div>
+        <div><span>Hefboom nu</span><b>${b.exposure.toFixed(1)}x / ${b.leverage}x</b></div>
+        <div><span>Positiegrootte</span><b>${b.notional ? usd(b.notional) : "-"}</b></div>
         <div><span>Instapprijs</span><b>${b.entry ? "$" + price(b.entry) : "-"}</b></div>
-        <div><span>Open resultaat</span><b class="${cls(b.unrealized_pct)}">${b.entry ? pct(b.unrealized_pct) : "-"}</b></div>
-        <div><span>Cash</span><b>${usd(b.cash)}</b></div>
+        <div><span>Open resultaat</span><b class="${cls(b.unrealized)}">${b.entry ? usd(b.unrealized) + " (koers " + pct(b.unrealized_pct) + ")" : "-"}</b></div>
         <div><span>Stop-loss</span><b>${b.stop_price ? "$" + price(b.stop_price) : "-"}</b></div>
+        <div><span>Liquidatie</span><b class="down">${b.liquidation_price ? "$" + price(b.liquidation_price) : "-"}</b></div>
+        <div><span>Saldo</span><b>${usd(b.balance)}</b></div>
         <div><span>Trades · fees</span><b>${b.n_trades} · ${usd(b.fees)}</b></div>
+        <div><span>Funding betaald</span><b>${usd(b.funding)}</b></div>
       </div>
     </div>
 
@@ -209,8 +212,8 @@ function card(b) {
 
     <div class="section" style="display:flex;gap:8px;align-items:center">
       ${stopped
-        ? `<button data-act="resume" data-sym="${esc(b.symbol)}">Hervatten</button><span class="note">Bot staat stil en zit in cash.</span>`
-        : `<button data-act="pause" data-sym="${esc(b.symbol)}">Stop en naar cash</button><span class="note">Verkoopt direct (paper) en pauzeert.</span>`}
+        ? `<button data-act="resume" data-sym="${esc(b.symbol)}">Hervatten</button><span class="note">Bot staat stil zonder positie.</span>`
+        : `<button data-act="pause" data-sym="${esc(b.symbol)}">Stop en sluiten</button><span class="note">Sluit de positie direct (paper) en pauzeert.</span>`}
     </div>
   </div>`;
 }
@@ -241,7 +244,7 @@ async function refresh() {
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");
   if (!btn) return;
-  if (btn.dataset.act === "pause" && !confirm(`${btn.dataset.sym}: alles (paper) verkopen en de bot pauzeren?`)) return;
+  if (btn.dataset.act === "pause" && !confirm(`${btn.dataset.sym}: positie (paper) sluiten en de bot pauzeren?`)) return;
   btn.disabled = true;
   await fetch(`/api/bots/${btn.dataset.sym}/${btn.dataset.act}`, { method: "POST" });
   refresh();

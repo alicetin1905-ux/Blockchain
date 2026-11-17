@@ -72,12 +72,37 @@ class PortfolioTest(unittest.TestCase):
     def test_round_trip_costs_fees(self):
         p = Portfolio(10_000)
         p.rebalance(1.0, 100.0, 0, "test", "x", 0.001, 0.0)
-        self.assertAlmostEqual(p.qty, 99.9)
+        self.assertAlmostEqual(p.qty, 100.0)  # futures: fee gaat van het saldo af
         p.rebalance(0.0, 100.0, 1, "test", "x", 0.001, 0.0)
         self.assertEqual(p.qty, 0.0)
-        self.assertAlmostEqual(p.cash, 10_000 * 0.999 * 0.999, places=6)
+        self.assertAlmostEqual(p.balance, 10_000 - 10 - 10, places=6)
         self.assertEqual(p.n_trades, 2)
         self.assertLess(p.trades[-1]["pnl"], 0)
+
+    def test_leverage_multiplies_result(self):
+        p = Portfolio(500)
+        p.rebalance(5.0, 100.0, 0, "test", "x", 0.0, 0.0)
+        self.assertAlmostEqual(p.notional(100.0), 2500)
+        self.assertAlmostEqual(p.equity(102.0), 550)      # +2% koers = +10% eigen geld
+        self.assertAlmostEqual(p.equity(98.0), 450)       # -2% koers = -10% eigen geld
+        liq = p.liquidation_price(0.005)
+        self.assertAlmostEqual(liq, 80.0 / 0.995, places=6)  # ~-19,6%
+        self.assertAlmostEqual(p.equity(liq), 0.005 * p.notional(liq), places=6)
+
+    def test_liquidation_wipes_margin(self):
+        p = Portfolio(500)
+        p.rebalance(5.0, 100.0, 0, "test", "x", 0.0, 0.0)
+        p.liquidate(p.liquidation_price(0.005), 1, "x", 0.005)
+        self.assertEqual(p.qty, 0.0)
+        self.assertLess(p.balance, 1e-6)
+        self.assertEqual(p.liquidations, 1)
+
+    def test_funding_costs_money(self):
+        p = Portfolio(500)
+        p.rebalance(5.0, 100.0, 0, "test", "x", 0.0, 0.0)
+        p.charge_funding(100.0, 0.0001)
+        self.assertAlmostEqual(p.funding, 0.25)
+        self.assertAlmostEqual(p.equity(100.0), 499.75)
 
 
 class RiskTest(unittest.TestCase):
@@ -86,13 +111,13 @@ class RiskTest(unittest.TestCase):
         r = RiskManager(s)
         r.on_candle(0, 10_000)
         self.assertEqual(r.filter(1.0, 0)[0], 1.0)
-        r.on_candle(HOUR, 9_400)  # -6% op een dag
+        r.on_candle(HOUR, 8_400)  # -16% op een dag
         self.assertEqual(r.filter(1.0, 1)[0], 0.0)
-        r.on_candle(25 * HOUR, 9_400)  # nieuwe dag
+        r.on_candle(25 * HOUR, 8_400)  # nieuwe dag
         self.assertEqual(r.filter(1.0, 2)[0], 1.0)
-        r.on_candle(49 * HOUR, 7_900)  # -21% onder piek
+        r.on_candle(49 * HOUR, 5_900)  # -41% onder piek
         self.assertTrue(r.killed)
-        r.resume(7_900)
+        r.resume(5_900)
         self.assertEqual(r.filter(1.0, 3)[0], 1.0)
         r.trigger_stop(10)
         self.assertEqual(r.filter(1.0, 12)[0], 0.0)
@@ -116,14 +141,35 @@ class BotTest(unittest.TestCase):
         bot = TradingBot("BTCUSDT", s)
         for k in synthetic(80, seed=4):
             bot.step(k, trade=False)
-        bot.portfolio.rebalance(1.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
-        bot.tick(bot.portfolio.entry * 0.96, 0)
+        bot.portfolio.rebalance(5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        bot.tick(bot.portfolio.entry * 0.97, 0)
         self.assertEqual(bot.portfolio.qty, 0.0)
         self.assertEqual(bot.portfolio.trades[-1]["reason"], "stop-loss")
+        self.assertGreater(bot.portfolio.balance, 400)  # stop voorkwam liquidatie
         bot.portfolio.rebalance(1.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
         bot.pause(0)
         self.assertEqual(bot.portfolio.qty, 0.0)
         self.assertEqual(bot.risk.filter(1.0, 10**9)[0], 0.0)
+
+    def test_gap_below_liquidation_liquidates(self):
+        s = Settings()
+        bot = TradingBot("BTCUSDT", s)
+        for k in synthetic(80, seed=5):
+            bot.step(k, trade=False)
+        bot.portfolio.rebalance(5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        crash = bot.last_price * 0.75
+        bot.step({"t": bot.last_t + HOUR, "o": crash, "h": crash, "l": crash * 0.99, "c": crash, "v": 1,
+                  "ct": bot.last_t + 2 * HOUR - 1}, trade=True)
+        self.assertEqual(bot.portfolio.liquidations, 1)
+        self.assertTrue(bot.risk.killed)
+
+    def test_never_exceeds_leverage(self):
+        s = Settings(min_model_updates=50)
+        candles = {"BTCUSDT": synthetic(1500, drift=0.0005, seed=7)}
+        bots = {"BTCUSDT": TradingBot("BTCUSDT", s)}
+        feed(bots, candles, trade_from=candles["BTCUSDT"][300]["t"])
+        bot = bots["BTCUSDT"]
+        self.assertLessEqual(bot.portfolio.exposure(bot.last_price), s.leverage * 1.15)
 
     def test_skips_duplicate_candles(self):
         bots = {"BTCUSDT": TradingBot("BTCUSDT", Settings())}

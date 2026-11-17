@@ -47,8 +47,9 @@ def run(candles, days, settings, seed=1):
 def report(bots):
     print()
     print("=" * 78)
-    print(f"PAPER-TRADING BACKTEST {next(iter(bots.values())).s.interval}"
-          "  (fees 0,1% + slippage 0,02% per trade meegerekend)")
+    s = next(iter(bots.values())).s
+    print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, {s.leverage:g}x hefboom")
+    print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, funding {s.funding_8h:.2%}/8u meegerekend)")
     print("=" * 78)
     total_start = total_eq = 0.0
     for sym, bot in bots.items():
@@ -58,9 +59,10 @@ def report(bots):
         total_eq += st["equity"]
         print(f"\n{st['name']} ({sym})")
         print(f"  Resultaat bot     {st['pnl_pct']:+7.2f}%   (${st['pnl']:+,.2f})")
-        print(f"  Kopen en houden   {st['buy_hold_pct']:+7.2f}%")
+        print(f"  Kopen en houden   {st['buy_hold_pct']:+7.2f}%   (1x, zonder hefboom)")
         print(f"  Max drawdown      {st['max_drawdown_pct']:7.2f}%")
-        print(f"  Trades            {st['n_trades']:7d}    fees ${st['fees']:,.2f}")
+        print(f"  Trades            {st['n_trades']:7d}    fees ${st['fees']:,.2f}   funding ${st['funding']:,.2f}"
+              f"   liquidaties {st['liquidations']}")
         if m.get("samples"):
             print(f"  Model             trefzeker {m['accuracy']:.1%} vs altijd-hetzelfde {m['majority_accuracy']:.1%},"
                   f" score {m['skill']:+.3f} (>0 = beter dan gokken)")
@@ -76,12 +78,14 @@ def report(bots):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS))
+    ap.add_argument("--capital", type=float, default=500)
+    ap.add_argument("--leverage", type=float, default=5)
     ap.add_argument("--days", type=int, default=180, help="dagen waarin getraded wordt")
     ap.add_argument("--warmup-days", type=int, default=60, help="dagen vooraf om alleen te leren")
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
-    settings = Settings(interval=args.interval)
+    settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage)
     per_day = 86_400_000 // settings.interval_ms
     candles = load_candles(args.interval, (args.days + args.warmup_days) * per_day, args.offline)
     report(run(candles, args.days, settings, args.seed))

@@ -68,8 +68,10 @@ class App:
             with open(self.state_file, "rb") as f:
                 data = pickle.load(f)
             if (data.get("version") != VERSION or set(data["bots"]) != set(SYMBOLS)
-                    or any(b.s.interval != self.s.interval for b in data["bots"].values())):
-                log.warning("Opgeslagen staat hoort bij een andere versie; begin opnieuw.")
+                    or any((b.s.interval, b.s.leverage, b.s.start_capital)
+                           != (self.s.interval, self.s.leverage, self.s.start_capital)
+                           for b in data["bots"].values())):
+                log.warning("Opgeslagen staat hoort bij een andere versie of andere instellingen; begin opnieuw.")
                 return False
             self.bots = data["bots"]
             return True

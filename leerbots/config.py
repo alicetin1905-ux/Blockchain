@@ -12,10 +12,13 @@ class Settings:
     # Candle-grootte. Kortere candles = meer trades = meer kosten. 1 uur is een goede start.
     interval: str = "1h"
 
-    # Portefeuille (elke bot heeft een eigen nep-portemonnee)
-    start_capital: float = 10_000.0
-    fee_rate: float = 0.001        # Binance spot taker-fee 0,1%
-    slippage: float = 0.0002       # 0,02% aangenomen slippage per trade
+    # Portefeuille (elke bot heeft een eigen nep-portemonnee, zoals een futures-account)
+    start_capital: float = 500.0
+    leverage: float = 5.0           # maximale hefboom (positie / eigen geld)
+    fee_rate: float = 0.0005        # Binance USDT-futures taker-fee 0,05% (spot: 0,001)
+    slippage: float = 0.0002        # 0,02% aangenomen slippage per trade
+    funding_8h: float = 0.0001      # gemiddelde funding 0,01% per 8 uur die longs betalen (spot: 0)
+    maintenance_margin: float = 0.005  # onder 0,5% van de positie wordt je geliquideerd
 
     # Leren
     horizon: int = 6               # model voorspelt 6 candles (6 uur) vooruit
@@ -26,17 +29,21 @@ class Settings:
     decision_every: int = 6         # elke 6 candles (6 uur) opnieuw een strategie kiezen
     confidence: float = 1.0         # hoe zeker een strategie moet zijn (hoger = voorzichtiger)
 
-    # Risico (de bot kan deze regels niet wegleren)
-    max_exposure: float = 1.0       # max deel van de eigen portemonnee in de munt
-    min_rebalance: float = 0.10     # kleinere aanpassingen dan 10% worden overgeslagen
-    stop_loss: float = 0.03         # 3% onder instapprijs -> verkopen
+    # Risico (de bot kan deze regels niet wegleren). Percentages van je eigen geld,
+    # behalve stop_loss: die gaat over de koers. Bij 5x kost 2% koersdaling 10% van je geld.
+    min_rebalance: float = 0.10     # aanpassingen kleiner dan 10% van de max positie overslaan
+    stop_loss: float = 0.02         # koers 2% onder instapprijs -> sluiten
     stop_cooldown: int = 6          # na stop-loss 6 candles niet kopen
-    daily_loss_limit: float = 0.05  # 5% verlies op een dag -> rest van de dag cash
-    max_drawdown: float = 0.20      # 20% onder de piek -> bot stopt tot handmatige hervatting
+    daily_loss_limit: float = 0.15  # 15% verlies op een dag -> rest van de dag geen positie
+    max_drawdown: float = 0.40      # 40% onder de piek -> bot stopt tot handmatige hervatting
 
     @property
     def interval_ms(self) -> int:
         return INTERVAL_MS[self.interval]
+
+    @property
+    def funding_per_candle(self) -> float:
+        return self.funding_8h * self.interval_ms / 28_800_000
 
     @property
     def cost(self) -> float:

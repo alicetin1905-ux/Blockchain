@@ -18,6 +18,8 @@ class RiskManager:
         if day != self.day:
             self.day, self.day_start, self.day_blocked = day, equity, False
         self.peak = equity if self.peak is None else max(self.peak, equity)
+        if equity <= 0:
+            self.killed = True
         if equity < self.day_start * (1 - self.s.daily_loss_limit):
             self.day_blocked = True
         if equity < self.peak * (1 - self.s.max_drawdown):

@@ -19,6 +19,8 @@ def main():
     ap.add_argument("--host", default="127.0.0.1", help="adres van het dashboard (standaard alleen deze pc)")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS), help="candle-grootte (standaard 1h)")
+    ap.add_argument("--capital", type=float, default=500, help="nep-startgeld per bot in USD (standaard 500)")
+    ap.add_argument("--leverage", type=float, default=5, help="maximale hefboom (standaard 5)")
     ap.add_argument("--warmup", type=int, default=3000, help="candles geschiedenis om op te leren bij de start")
     ap.add_argument("--poll", type=float, default=10, help="seconden tussen koerscontroles")
     ap.add_argument("--state", default="state", help="map waar de bots hun geheugen opslaan")
@@ -28,7 +30,8 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     log = logging.getLogger("leerbots")
 
-    app = App(Settings(interval=args.interval), args.state, args.warmup)
+    app = App(Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage),
+              args.state, args.warmup)
     server = make_server(app, args.host, args.port)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log.info("Dashboard: http://%s:%d  (PAPER TRADING, geen echt geld)", args.host, args.port)

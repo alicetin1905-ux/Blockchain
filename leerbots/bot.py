@@ -20,7 +20,7 @@ from .portfolio import Portfolio
 from .risk import RiskManager
 from .strategies import KEYS, STRATEGIES
 
-VERSION = 1
+VERSION = 2
 
 
 class TradingBot:
@@ -62,15 +62,14 @@ class TradingBot:
         self.last_price = c
         pf = self.portfolio
 
-        if trade and pf.qty > 0:
-            sp = self.risk.stop_price(pf.entry)
-            if k["l"] <= sp:
-                self._sell_all(min(sp, k["o"]), k["t"], "stop-loss")
-                self.risk.trigger_stop(self.index)
+        if trade:
+            self._check_exits(k["o"], k["l"], k["t"])
+            pf.charge_funding(c, self.s.funding_per_candle)
 
         if self.prev_close:
             ret = math.log(c / self.prev_close)
-            self.bandit.update({a: 1e4 * (self.virt[a] * ret - self.virt_cost[a]) for a in KEYS})
+            fund = self.s.funding_per_candle
+            self.bandit.update({a: 1e4 * (self.virt[a] * (ret - fund) - self.virt_cost[a]) for a in KEYS})
         self.virt_cost = {a: 0.0 for a in KEYS}
         self.prev_close = c
 
@@ -122,24 +121,39 @@ class TradingBot:
             self.start_price, self.start_t = price, k["t"]
         self.risk.on_candle(k["t"], pf.equity(price))
         self.active_counts[self.active] += 1
-        target, self.risk_note = self.risk.filter(self.virt[self.active] * self.s.max_exposure, self.index)
+        target, self.risk_note = self.risk.filter(self.virt[self.active] * self.s.leverage, self.index)
         cur = pf.exposure(price)
-        if (target <= 0 and pf.qty > 0) or abs(target - cur) >= self.s.min_rebalance:
+        if (target <= 0 and pf.qty > 0) or abs(target - cur) >= self.s.min_rebalance * self.s.leverage:
             reason = self.risk_note or STRATEGIES[self.active][0]
             pf.rebalance(target, price, k["t"], reason, self.active, self.s.fee_rate, self.s.slippage)
 
     def _sell_all(self, price, t, reason):
         self.portfolio.rebalance(0.0, price, t, reason, self.active, self.s.fee_rate, self.s.slippage)
 
-    def tick(self, price, t):
-        """Live koers tussen candles door: stop-loss direct uitvoeren."""
-        self.last_price = price
+    def _check_exits(self, open_, low, t):
+        """Stop-loss en liquidatie. De koers loopt van open naar low; wat eerst geraakt wordt telt."""
         pf = self.portfolio
-        if pf.qty > 0:
-            sp = self.risk.stop_price(pf.entry)
-            if price <= sp:
-                self._sell_all(price, t, "stop-loss")
-                self.risk.trigger_stop(self.index)
+        if pf.qty <= 0:
+            return
+        sp = self.risk.stop_price(pf.entry)
+        liq = pf.liquidation_price(self.s.maintenance_margin)
+        if liq is not None and liq >= sp:      # positie zo groot dat liquidatie eerder komt
+            sp = None
+        if liq is not None and open_ <= liq:
+            pf.liquidate(open_, t, self.active, self.s.maintenance_margin)
+        elif sp is not None and open_ <= sp:
+            self._sell_all(open_, t, "stop-loss")
+            self.risk.trigger_stop(self.index)
+        elif sp is not None and low <= sp:
+            self._sell_all(sp, t, "stop-loss")
+            self.risk.trigger_stop(self.index)
+        elif liq is not None and low <= liq:
+            pf.liquidate(liq, t, self.active, self.s.maintenance_margin)
+
+    def tick(self, price, t):
+        """Live koers tussen candles door: stop-loss en liquidatie direct uitvoeren."""
+        self.last_price = price
+        self._check_exits(price, price, t)
 
     def pause(self, t):
         self.risk.paused = True
@@ -153,7 +167,8 @@ class TradingBot:
         eq = self.portfolio.equity(price)
         self.history.append((t, eq, price))
         self.peak_equity = max(self.peak_equity, eq)
-        self.max_dd = max(self.max_dd, 1 - eq / self.peak_equity)
+        if self.peak_equity > 0:
+            self.max_dd = max(self.max_dd, 1 - eq / self.peak_equity)
 
     # ---------------------------------------------------------------- status
     def status(self, chart_points=600):
@@ -198,13 +213,19 @@ class TradingBot:
             "pnl_pct": (eq / pf.start - 1) * 100,
             "buy_hold_pct": (price / self.start_price - 1) * 100 if self.start_price else 0.0,
             "trading_since": self.start_t,
-            "cash": pf.cash,
+            "balance": pf.balance,
             "qty": pf.qty,
             "entry": pf.entry,
+            "leverage": self.s.leverage,
             "exposure": pf.exposure(price) if price else 0.0,
+            "notional": pf.notional(price),
+            "unrealized": pf.unrealized(price),
             "unrealized_pct": (price / pf.entry - 1) * 100 if pf.entry else 0.0,
             "stop_price": sp,
+            "liquidation_price": pf.liquidation_price(self.s.maintenance_margin),
             "fees": pf.fees,
+            "funding": pf.funding,
+            "liquidations": pf.liquidations,
             "n_trades": pf.n_trades,
             "max_drawdown_pct": self.max_dd * 100,
             "active_strategy": self.active,
