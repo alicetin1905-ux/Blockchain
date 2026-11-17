@@ -43,7 +43,8 @@ def feed(bots, candles_by_symbol, trade_from=None):
 
 def _key(s):
     """Instellingen die bepalen of opgeslagen bots nog bruikbaar zijn."""
-    return (s.interval, s.leverage, s.start_capital, getattr(s, "risk_per_trade", None), s.stop_loss,
+    return (s.interval, s.leverage, s.start_capital, getattr(s, "risk_per_trade", None),
+            getattr(s, "stop_vol_mult", None),
             getattr(s, "allow_short", True))
 
 

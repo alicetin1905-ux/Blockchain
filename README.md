@@ -44,6 +44,7 @@ python3 backtest.py --periods 4       # 4 aparte periodes van 180 dagen: is het 
 python3 backtest.py --risk 5 --leverage 3
 python3 backtest.py --from 2020 --to 2026 # elk kalenderjaar apart, met verse bots
 python3 backtest.py --no-short            # alleen long
+python3 backtest.py --stop-mult 3         # ruimere stop-loss (3x de dagbeweging)
 ```
 
 De bots leren tijdens de test gewoon door en zien nooit de toekomst: elke beslissing gebruikt alleen data van vóór dat moment. Test een wijziging altijd met `--periods 4`. Eén goede periode zegt weinig.
@@ -86,24 +87,29 @@ Zodra die 6 candles voorbij zijn, weten de modellen of ze gelijk hadden en passe
 
 **4. Strategiekiezer** (`leerbots/bandit.py`), de eigenlijke zelfleer-laag:
 - Elke candle krijgt elke strategie een virtuele score: wat ze ná kosten verdiend zou hebben, long of short, ook als de bot haar niet volgt.
+- Die virtuele trades volgen **precies dezelfde regels als de echte**: dezelfde positiegrootte, dezelfde stop-loss en dezelfde afkoeltijd na een stop. De bot leert dus welke strategie werkt mét de regels die echt gelden.
 - Oude resultaten vervagen (discount 0,995, ongeveer 8 dagen geheugen), zodat de bot zich aanpast als de markt omslaat.
 - Elke 6 candles kiest de bot de strategie met de hoogste *ondergrens*: het gemiddelde min de onzekerheid. Is geen strategie aantoonbaar beter dan niets doen, dan blijft hij in cash.
 - Hij wisselt alleen als de verwachte winst de kosten van de wissel dekt.
 
 **5. Eén positie per munt.** Een positie wordt in één keer geopend en in één keer gesloten. De bot koopt niet bij en bouwt niet half af. Draait de strategie van long naar short, dan sluit hij eerst de long en opent daarna de short.
 
-**6. Positiegrootte en risico per trade.** De bot kiest de grootste positie waarbij een geraakte stop-loss, inclusief fees en slippage, hoogstens het ingestelde risico kost:
+**6. Stop-loss die meebeweegt met de markt.** De stop-loss ligt op 2x de normale dagbeweging van de munt, berekend uit de laatste 48 candles, met een minimum van 1% en een maximum van 15%. In een rustige markt ligt hij dicht bij de instap, in een wilde markt verder weg. Zo wordt een positie niet door gewone schommelingen uitgestopt.
+
+**7. Positiegrootte en risico per trade.** De bot kiest de grootste positie waarbij een geraakte stop-loss, inclusief fees en slippage, hoogstens het ingestelde risico kost:
 
 ```
-positie = risico / (2% stop-loss + 0,14% kosten), nooit meer dan de hefboom
-  2% risico   -> 0,93x je geld  ($467 bij $500)
-  5% risico   -> 2,34x
- 10% risico   -> 4,67x
+positie = risico / (stop-afstand + 0,14% kosten), nooit meer dan de hefboom
+
+voorbeelden bij 2% risico:   stop 3%  -> 0,64x je geld   stop 6%  -> 0,33x   stop 10% -> 0,20x
+voorbeelden bij 5% risico:   stop 3%  -> 1,59x           stop 6%  -> 0,81x   stop 10% -> 0,49x
 ```
 
-**7. Risicoregels** (`leerbots/risk.py`). Deze staan buiten het lerende deel, dus de bot kan ze niet "wegleren".
-- stop-loss bij 2% koersbeweging tegen de positie in (onder de instap bij long, erboven bij short), daarna 6 candles afkoelen;
-- liquidatie wordt gesimuleerd. Bij 5x is dat ongeveer 19,6% tegen je in, en dan is de inleg weg. De stop-loss moet dat voorkomen, maar bij een plotselinge koerssprong (gat) kan het toch gebeuren;
+Ruimere stop betekent een kleinere positie, maar een geraakte stop kost altijd hetzelfde: 2% of 5% van je geld.
+
+**8. Risicoregels** (`leerbots/risk.py`). Deze staan buiten het lerende deel, dus de bot kan ze niet "wegleren".
+- de stop-loss en positiegrootte hierboven, daarna 6 candles afkoelen;
+- liquidatie wordt gesimuleerd. De stop-loss moet dat voorkomen, maar bij een plotselinge koerssprong (gat) kan het toch gebeuren;
 - bij 15% verlies op een dag geen positie meer voor de rest van die dag;
 - bij 40% onder de piek stopt de bot tot je hem op het dashboard hervat;
 - knop "Stop en sluiten" per bot.
@@ -129,33 +135,32 @@ Ook de virtuele scores rekenen deze kosten mee. Alle instellingen staan in `leer
 
 ## Eerlijk over wat je kunt verwachten
 
-De bots hebben in de tests **geen betrouwbaar voordeel** laten zien. Zo ziet `python3 backtest.py --periods 4` eruit, met vier aparte periodes van 180 dagen (november 2024 tot november 2026), $500 per bot:
+Getest over 2020 tot 2026, elk kalenderjaar apart met verse bots van $500 (`python3 backtest.py --from 2020 --to 2026`):
 
-| Instelling | Gemiddeld per periode | Noodstop geraakt |
-|---|---|---|
-| Alleen long, 10% risico | -16% | 12 van 12 keer |
-| Alleen long, 2% risico | -5% | 0 van 12 keer |
-| Long en short, 10% risico | -21% | 12 van 12 keer |
-| Long en short, 5% risico | -13% | 9 van 12 keer |
-| **Long en short, 2% risico (standaard)** | **-12%** | 2 van 12 keer |
+| Jaar | Alleen long, 2% | Alleen long, 5% | Long + short, 2% (standaard) | Long + short, 5% |
+|---|---|---|---|---|
+| 2020 | +22% | +42% | -1% | -10% |
+| 2021 | +24% | +65% | -11% | -7% |
+| 2022 | -7% | -8% | -11% | -25% |
+| 2023 | +22% | +57% | +7% | +14% |
+| 2024 | -0% | -3% | -14% | -26% |
+| 2025 | -7% | -15% | -13% | -29% |
+| 2026 (t/m nov) | -6% | -11% | -6% | -15% |
+| **Gemiddeld** | **+7%** | **+18%** | **-7%** | **-14%** |
+| Noodstop geraakt | 0 van 21 | 0 van 21 | 0 van 21 | 9 van 21 |
 
-Over 2020 tot 2026, elk jaar apart met verse bots van $500 (`--from 2020 --to 2026`):
+Wat dit betekent:
 
-| Instelling | Gemiddeld per jaar | Noodstop geraakt |
-|---|---|---|
-| Long en short, 2% risico (standaard) | -21% | 13 van 21 keer |
-| Alleen long, 2% risico | -9% | 6 van 21 keer |
-| Long en short, 10% risico | +13% | 21 van 21 keer |
+- **Shorten kost geld.** In elk van de 7 jaren deed long + short het slechter dan alleen long. De bots zitten met shorts vaak fout. Gebruik `--no-short`.
+- **Alleen long verdient vooral in stijgende jaren** (2020, 2021, 2023), maar veel minder dan kopen en houden. Zo deed BTC kopen en houden in 2020 +303% en de bot +31%. In dalende jaren verliest de bot wel veel minder: in 2022 -7% tegenover -65% tot -94% voor kopen en houden.
+- **De laatste twee jaar (2025-2026) zijn negatief**, ook met alleen long. Een groot deel van de winst komt uit de sterke stijgingsjaren 2020-2023. Of dat zich herhaalt, weet niemand.
+- **Het resultaat hangt niet af van de precieze stop-loss.** Met 1,5x, 2x of 3x de dagbeweging is alleen long steeds positief (+5% tot +21% per jaar) en long + short steeds negatief (-4% tot -13%). Test zelf met `--stop-mult`.
+- **De modellen scoren rond 0**, dus niet beter dan gokken. De winst komt van de eenvoudige strategieën en de risicoregels, niet van voorspellen.
+- **De 5x hefboom wordt meestal niet gebruikt.** Bij 2% of 5% risico en een stop van een paar procent blijft de positie onder 1,6x. De hefboom is alleen een plafond.
 
-Die +13% bij 10% risico komt vrijwel helemaal uit één uitschieter: SOL in 2023 (+625%). Alle andere bots raakten de noodstop. Dat is geluk, geen strategie.
+Een eerdere versie had een vaste stop-loss van 2% en beoordeelde strategieën zonder stop-loss. Die verloor gemiddeld 9% (alleen long) tot 21% (long + short) per jaar, doordat gewone schommelingen bijna elke trade uitstopten.
 
-**Bekend probleem:** de vaste stop-loss van 2% is te krap voor crypto. Van de trades die op een stop-loss eindigden, ging het overgrote deel verloren aan gewone schommelingen, terwijl de trades die de strategie zelf sloot gemiddeld winst maakten. Daarbij beoordeelt de strategiekiezer de strategieën nu zónder stop-loss, terwijl de echte trades er wel een hebben.
-
-- **Shorten hielp in deze test niet.** De strategieën verloren op shorts ongeveer even vaak als op longs, en meer trades betekent meer kosten.
-- **Hoger risico per trade is vooral gokken.** Met 10% raakt elke bot vroeg of laat de noodstop.
-- **De modellen scoren rond 0**, dus niet beter dan gokken. De strategiekiezer merkt dat en volgt ze dan weinig.
-- **De 5x hefboom wordt bij 2% risico niet gebruikt.** De positie blijft dan onder 1x. De hefboom is alleen een plafond.
-- Laat de bots eerst lang op paper draaien voordat je aan echt geld denkt. Echte handel zit er bewust niet in. Als die ooit wordt toegevoegd: gebruik API-sleutels zonder opnamerechten en alleen geld dat je kunt missen.
+Laat de bots eerst lang op paper draaien voordat je aan echt geld denkt. Echte handel zit er bewust niet in. Als die ooit wordt toegevoegd: gebruik API-sleutels zonder opnamerechten en alleen geld dat je kunt missen.
 
 ## Tests
 

@@ -100,6 +100,6 @@ class FeatureEngine:
         ]
         if self.use_ref:
             x += [ref["r3"], ref["r12"]] if ref else [0.0, 0.0]
-        ind = {"close": c, "rsi": rsi, "ema20": self.ema20, "ema50": self.ema50,
+        ind = {"close": c, "rsi": rsi, "ema20": self.ema20, "ema50": self.ema50, "vol48": x[5],
                "high48": high48, "low48": low48, "high12": high12, "low12": low12}
         return {"t": k["t"], "x": x, "ind": ind, "r3": r3, "r12": r12}

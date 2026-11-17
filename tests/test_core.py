@@ -71,7 +71,7 @@ class BanditTest(unittest.TestCase):
 class PortfolioTest(unittest.TestCase):
     def test_round_trip_costs_fees(self):
         p = Portfolio(10_000)
-        p.open(1, 1.0, 100.0, 0, "test", "x", 0.001, 0.0)
+        p.open(1, 1.0, 100.0, 0, "test", "x", 0.001, 0.0, 0.02)
         self.assertAlmostEqual(p.qty, 100.0)  # futures: fee gaat van het saldo af
         p.close(100.0, 1, "test", "x", 0.001, 0.0)
         self.assertEqual(p.qty, 0.0)
@@ -82,13 +82,13 @@ class PortfolioTest(unittest.TestCase):
 
     def test_long_and_short_with_leverage(self):
         p = Portfolio(500)
-        p.open(1, 5.0, 100.0, 0, "test", "x", 0.0, 0.0)
+        p.open(1, 5.0, 100.0, 0, "test", "x", 0.0, 0.0, 0.02)
         self.assertEqual(p.side, "LONG")
         self.assertAlmostEqual(p.notional(100.0), 2500)
         self.assertAlmostEqual(p.equity(102.0), 550)      # +2% koers = +10% eigen geld
         self.assertAlmostEqual(p.exposure(100.0), 5.0)
         p.close(100.0, 1, "t", "x", 0.0, 0.0)
-        p.open(-1, 5.0, 100.0, 2, "test", "x", 0.0, 0.0)
+        p.open(-1, 5.0, 100.0, 2, "test", "x", 0.0, 0.0, 0.02)
         self.assertEqual(p.side, "SHORT")
         self.assertAlmostEqual(p.exposure(100.0), -5.0)
         self.assertAlmostEqual(p.equity(98.0), 550)       # short: -2% koers = +10%
@@ -99,19 +99,19 @@ class PortfolioTest(unittest.TestCase):
 
     def test_only_one_position(self):
         p = Portfolio(500)
-        self.assertIsNotNone(p.open(1, 2.0, 100.0, 0, "t", "x", 0.0, 0.0))
-        self.assertIsNone(p.open(1, 2.0, 100.0, 1, "t", "x", 0.0, 0.0))
-        self.assertIsNone(p.open(-1, 2.0, 100.0, 1, "t", "x", 0.0, 0.0))
+        self.assertIsNotNone(p.open(1, 2.0, 100.0, 0, "t", "x", 0.0, 0.0, 0.02))
+        self.assertIsNone(p.open(1, 2.0, 100.0, 1, "t", "x", 0.0, 0.0, 0.02))
+        self.assertIsNone(p.open(-1, 2.0, 100.0, 1, "t", "x", 0.0, 0.0, 0.02))
         self.assertEqual(p.n_trades, 1)
 
     def test_liquidation_prices(self):
         p = Portfolio(500)
-        p.open(1, 5.0, 100.0, 0, "t", "x", 0.0, 0.0)
+        p.open(1, 5.0, 100.0, 0, "t", "x", 0.0, 0.0, 0.02)
         liq = p.liquidation_price(0.005)
         self.assertAlmostEqual(liq, 80.0 / 0.995, places=6)           # long: ~-19,6%
         self.assertAlmostEqual(p.equity(liq), 0.005 * p.notional(liq), places=6)
         p.close(100.0, 1, "t", "x", 0.0, 0.0)
-        p.open(-1, 5.0, 100.0, 2, "t", "x", 0.0, 0.0)
+        p.open(-1, 5.0, 100.0, 2, "t", "x", 0.0, 0.0, 0.02)
         liq = p.liquidation_price(0.005)
         self.assertAlmostEqual(liq, 120.0 / 1.005, places=6)          # short: ~+19,4%
         self.assertAlmostEqual(p.equity(liq), 0.005 * p.notional(liq), places=6)
@@ -123,7 +123,7 @@ class PortfolioTest(unittest.TestCase):
     def test_funding_costs_money_both_sides(self):
         for d in (1, -1):
             p = Portfolio(500)
-            p.open(d, 5.0, 100.0, 0, "test", "x", 0.0, 0.0)
+            p.open(d, 5.0, 100.0, 0, "test", "x", 0.0, 0.0, 0.02)
             p.charge_funding(100.0, 0.0001)
             self.assertAlmostEqual(p.funding, 0.25)
             self.assertAlmostEqual(p.equity(100.0), 499.75)
@@ -166,12 +166,12 @@ class BotTest(unittest.TestCase):
         bot = TradingBot("BTCUSDT", s)
         for k in synthetic(80, seed=4):
             bot.step(k, trade=False)
-        bot.portfolio.open(1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        bot.portfolio.open(1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage, 0.02)
         bot.tick(bot.portfolio.entry * 0.97, 0)
         self.assertEqual(bot.portfolio.qty, 0.0)
         self.assertEqual(bot.portfolio.trades[-1]["reason"], "stop-loss")
         self.assertGreater(bot.portfolio.balance, 400)  # stop voorkwam liquidatie
-        bot.portfolio.open(-1, 1.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        bot.portfolio.open(-1, 1.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage, 0.02)
         bot.pause(0)
         self.assertEqual(bot.portfolio.qty, 0.0)
         self.assertEqual(bot.risk.filter(1.0, 10**9)[0], 0.0)
@@ -181,7 +181,7 @@ class BotTest(unittest.TestCase):
         bot = TradingBot("BTCUSDT", s)
         for k in synthetic(80, seed=5):
             bot.step(k, trade=False)
-        bot.portfolio.open(1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        bot.portfolio.open(1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage, 0.02)
         crash = bot.last_price * 0.75
         bot.step({"t": bot.last_t + HOUR, "o": crash, "h": crash, "l": crash * 0.99, "c": crash, "v": 1,
                   "ct": bot.last_t + 2 * HOUR - 1}, trade=True)
@@ -193,14 +193,14 @@ class BotTest(unittest.TestCase):
         bot = TradingBot("BTCUSDT", s)
         for k in synthetic(80, seed=8):
             bot.step(k, trade=False)
-        bot.portfolio.open(-1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        bot.portfolio.open(-1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage, 0.02)
         bot.tick(bot.portfolio.entry * 0.97, 0)                  # koers daalt: short blijft open
         self.assertLess(bot.portfolio.qty, 0)
         bot.tick(bot.portfolio.entry * 1.03, 0)                  # koers stijgt 3%: stop-loss
         self.assertEqual(bot.portfolio.qty, 0.0)
         self.assertEqual(bot.portfolio.trades[-1]["side"], "SLUIT SHORT")
         bot.risk.cooldown_until = -1
-        bot.portfolio.open(-1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
+        bot.portfolio.open(-1, 5.0, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage, 0.02)
         spike = bot.last_price * 1.3
         bot.step({"t": bot.last_t + HOUR, "o": spike, "h": spike, "l": spike, "c": spike, "v": 1,
                   "ct": bot.last_t + 2 * HOUR - 1}, trade=True)
@@ -222,28 +222,51 @@ class BotTest(unittest.TestCase):
             for a, b in zip(sides, sides[1:]):
                 self.assertNotEqual(a, b)
 
+    def test_stop_follows_volatility(self):
+        s = Settings()  # 1h-candles, stop = 2x dagbeweging, 1%-15%
+        self.assertAlmostEqual(s.stop_distance(0.005), 2 * 0.005 * 24 ** 0.5)   # rustig: ~4,9%
+        self.assertEqual(s.stop_distance(0.0001), 0.01)                        # nooit krapper dan 1%
+        self.assertEqual(s.stop_distance(0.1), 0.15)                           # nooit ruimer dan 15%
+
     def test_risk_per_trade_sizes_position(self):
-        s = Settings(risk_per_trade=0.10)  # 10% risico, stop 2%, max 5x
-        self.assertAlmostEqual(s.max_exposure, 0.10 / (0.02 + 2 * s.cost))
-        self.assertLess(s.max_exposure, s.leverage)
-        self.assertEqual(Settings(risk_per_trade=0.5).max_exposure, 5.0)  # hefboom blijft het plafond
-        self.assertAlmostEqual(Settings(risk_per_trade=0.02).max_exposure, 0.02 / (0.02 + 2 * s.cost))
+        s = Settings(risk_per_trade=0.02)
+        self.assertAlmostEqual(s.size_for(0.05), 0.02 / (0.05 + 2 * s.cost))
+        self.assertGreater(s.size_for(0.02), s.size_for(0.08))                 # ruimere stop = kleinere positie
+        self.assertEqual(Settings(risk_per_trade=0.5).size_for(0.02), 5.0)    # hefboom blijft het plafond
 
     def test_stop_loss_costs_at_most_risk_per_trade(self):
+        for risk in (0.02, 0.05):
+            s = Settings(risk_per_trade=risk)
+            bot = TradingBot("BTCUSDT", s)
+            for k in synthetic(80, seed=6):
+                bot.step(k, trade=False)
+            for d in (1, -1):
+                start = bot.portfolio.equity(bot.last_price)
+                bot._open(d, bot.last_price, 0, "test")
+                self.assertAlmostEqual(abs(bot.portfolio.stop / bot.portfolio.entry - 1), bot.stop_dist)
+                self.assertLessEqual(bot._loss_at_stop() / start, risk + 1e-9)
+                bot.tick(bot.portfolio.stop, 0)
+                self.assertEqual(bot.portfolio.qty, 0.0)
+                loss = 1 - bot.portfolio.balance / start
+                self.assertGreater(loss, risk * 0.9)
+                self.assertLessEqual(loss, risk + 1e-9)
+
+    def test_virtual_strategies_use_the_same_stop_loss(self):
         s = Settings()
         bot = TradingBot("BTCUSDT", s)
-        for k in synthetic(80, seed=6):
+        for k in synthetic(80, seed=9):
             bot.step(k, trade=False)
-        start = bot.portfolio.equity(bot.last_price)
-        for d in (1, -1):
-            start = bot.portfolio.equity(bot.last_price)
-            bot.portfolio.open(d, s.max_exposure, bot.last_price, 0, "test", "trend", s.fee_rate, s.slippage)
-            self.assertLessEqual(bot._loss_at_stop() / start, s.risk_per_trade + 1e-9)
-            bot.tick(bot.risk.stop_price(bot.portfolio.entry, d), 0)
-            self.assertEqual(bot.portfolio.qty, 0.0)
-            loss = 1 - bot.portfolio.balance / start
-            self.assertGreater(loss, s.risk_per_trade * 0.9)
-            self.assertLessEqual(loss, s.risk_per_trade + 1e-9)
+        bot.virt["trend"], bot.vsize["trend"] = 1, 1.0
+        bot.vstop["trend"] = bot.last_price * 0.95
+        crash = bot.last_price * 0.90
+        t = bot.last_t + HOUR
+        bot.step({"t": t, "o": bot.last_price, "h": bot.last_price, "l": crash, "c": crash, "v": 100,
+                  "ct": t + HOUR - 1}, trade=False)
+        self.assertEqual(bot.virt["trend"], 0)                       # virtueel uitgestopt
+        self.assertGreater(bot.vcool["trend"], bot.index)           # en afkoelen
+        # beloning: -5% tot de stop plus kosten, niet -10% tot de slotkoers
+        self.assertLess(bot.bandit.total["trend"], -0.04)
+        self.assertGreater(bot.bandit.total["trend"], -0.07)
 
     def test_skips_duplicate_candles(self):
         bots = {"BTCUSDT": TradingBot("BTCUSDT", Settings())}

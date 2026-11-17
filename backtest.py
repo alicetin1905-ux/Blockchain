@@ -54,7 +54,8 @@ def header(s):
     print("=" * 84)
     sides = "long en short" if s.allow_short else "alleen long"
     print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, {sides}, 1 positie per munt,")
-    print(f"max {s.leverage:g}x hefboom, max {s.risk_per_trade:.0%} risico per trade (positie {s.max_exposure:.2f}x)")
+    print(f"max {s.leverage:g}x hefboom, max {s.risk_per_trade:.0%} risico per trade,"
+          f" stop-loss {s.stop_vol_mult:g}x de dagbeweging ({s.stop_min:.0%}-{s.stop_max:.0%})")
     print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, funding {s.funding_8h:.2%}/8u meegerekend)")
     print("=" * 84)
 
@@ -183,10 +184,13 @@ def main():
     ap.add_argument("--from", dest="first", type=int, help="eerste jaar (test elk jaar apart)")
     ap.add_argument("--to", dest="last", type=int, help="laatste jaar")
     ap.add_argument("--no-short", action="store_true", help="alleen long, niet shorten")
+    ap.add_argument("--stop-mult", type=float, default=Settings.stop_vol_mult,
+                    help="stop-loss = zoveel keer de normale dagbeweging (standaard 2)")
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     args = ap.parse_args()
     settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
-                        risk_per_trade=args.risk / 100, allow_short=not args.no_short)
+                        risk_per_trade=args.risk / 100, allow_short=not args.no_short,
+                        stop_vol_mult=args.stop_mult)
     if args.first:
         last = args.last or dt.datetime.now(dt.timezone.utc).year
         candles = load_years(args.interval, args.first, last, args.warmup_days, args.offline)

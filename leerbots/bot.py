@@ -21,7 +21,7 @@ from .portfolio import Portfolio
 from .risk import RiskManager
 from .strategies import KEYS, STRATEGIES
 
-VERSION = 3
+VERSION = 4
 
 
 class TradingBot:
@@ -34,8 +34,14 @@ class TradingBot:
         self.model_up = OnlineLogReg(n, settings.learning_rate, settings.l2)    # kans op stijging
         self.model_down = OnlineLogReg(n, settings.learning_rate, settings.l2)  # kans op daling
         self.bandit = DiscountedThompson(KEYS, settings.bandit_discount)
-        self.virt = {k: 0 for k in KEYS}          # virtuele richting per strategie (+1, 0, -1)
+        # Virtuele positie per strategie, met dezelfde regels als echte trades:
+        # richting (+1, 0, -1), grootte (x eigen geld), stop-loss koers en afkoelen na een stop.
+        self.virt = {k: 0 for k in KEYS}
+        self.vsize = {k: 0.0 for k in KEYS}
+        self.vstop = {k: None for k in KEYS}
+        self.vcool = {k: -1 for k in KEYS}
         self.virt_cost = {k: 0.0 for k in KEYS}
+        self.stop_dist = None                      # huidige stop-afstand (op basis van beweeglijkheid)
         self.active = None
         self.last_decision = -10 ** 9
         self.active_counts = {k: 0 for k in KEYS}
@@ -70,10 +76,7 @@ class TradingBot:
             pf.charge_funding(c, self.s.funding_per_candle)
 
         if self.prev_close:
-            ret = c / self.prev_close - 1
-            fund = self.s.funding_per_candle
-            self.bandit.update({a: 1e4 * (self.virt[a] * ret - abs(self.virt[a]) * fund - self.virt_cost[a])
-                                for a in KEYS})
+            self.bandit.update(self._virtual_rewards(k))
         self.virt_cost = {a: 0.0 for a in KEYS}
         self.prev_close = c
 
@@ -98,12 +101,20 @@ class TradingBot:
         self.pending.append((self.index, x, c))
         base = (self.model_up.base_rate, self.model_down.base_rate)
 
+        self.stop_dist = self.s.stop_distance(feats["ind"]["vol48"])
+        size = self.s.size_for(self.stop_dist)
         for a in KEYS:
-            new = STRATEGIES[a][1](feats["ind"], self.virt[a], self.p, base)
+            old = self.virt[a]
+            new = STRATEGIES[a][1](feats["ind"], old, self.p, base)
             if not self.s.allow_short:
                 new = max(new, 0)
-            self.virt_cost[a] = self.s.cost * abs(new - self.virt[a])
-            self.virt[a] = new
+            if self.index < self.vcool[a]:      # afkoelen na een virtuele stop-loss
+                new = 0
+            if new != old:
+                self.virt_cost[a] = self.s.cost * (self.vsize[a] * abs(old) + size * abs(new))
+                self.virt[a] = new
+                self.vsize[a] = size if new else 0.0
+                self.vstop[a] = c * (1 - new * self.stop_dist) if new else None
 
         if self.active is None or self.index - self.last_decision >= self.s.decision_every:
             self._choose()
@@ -113,6 +124,36 @@ class TradingBot:
             self._record(k["t"], c)
         return feats
 
+    def _virtual_rewards(self, k):
+        """Wat elke strategie deze candle verdiende, in bps van haar geld, na kosten, funding en stop-loss.
+
+        Precies dezelfde regels als de echte trades: raakt de koers de stop, dan sluit de
+        virtuele positie op de stop (of op de open bij een gat) en volgt afkoeltijd.
+        """
+        p0, c = self.prev_close, k["c"]
+        fund = self.s.funding_per_candle
+        rewards = {}
+        for a in KEYS:
+            r = -self.virt_cost[a]
+            d = self.virt[a]
+            if d:
+                size, stop = self.vsize[a], self.vstop[a]
+                worst = k["l"] if d > 0 else k["h"]
+                if (k["o"] - stop) * d <= 0:
+                    exit_price = k["o"]
+                elif (worst - stop) * d <= 0:
+                    exit_price = stop
+                else:
+                    exit_price = None
+                end = c if exit_price is None else exit_price
+                r += size * (d * (end / p0 - 1) - fund)
+                if exit_price is not None:
+                    r -= size * self.s.cost
+                    self.virt[a], self.vsize[a], self.vstop[a] = 0, 0.0, None
+                    self.vcool[a] = self.index + self.s.stop_cooldown
+            rewards[a] = 1e4 * r
+        return rewards
+
     def _choose(self):
         """Kies een strategie. Wissel alleen als de verwachte winst de wisselkosten dekt."""
         self.last_decision = self.index
@@ -120,7 +161,8 @@ class TradingBot:
         if self.active is None or pick == self.active:
             self.active = pick
             return
-        switch_bps = 1e4 * self.s.cost * abs(self.virt[pick] - self.virt[self.active])
+        switch_bps = 1e4 * self.s.cost * abs(self.virt[pick] * self.vsize[pick]
+                                             - self.virt[self.active] * self.vsize[self.active])
         gain_bps = self.bandit.posterior(pick)[0] - self.bandit.posterior(self.active)[0]
         if gain_bps * self.s.decision_every > switch_bps:
             self.active = pick
@@ -141,8 +183,12 @@ class TradingBot:
             self._close(price, k["t"], reason)
             have = 0
         if want and not have:
-            pf.open(want, self.s.max_exposure, price, k["t"], reason, self.active,
-                    self.s.fee_rate, self.s.slippage)
+            self._open(want, price, k["t"], reason)
+
+    def _open(self, direction, price, t, reason):
+        dist = self.stop_dist
+        return self.portfolio.open(direction, self.s.size_for(dist), price, t, reason, self.active,
+                                   self.s.fee_rate, self.s.slippage, dist)
 
     def _close(self, price, t, reason):
         self.portfolio.close(price, t, reason, self.active, self.s.fee_rate, self.s.slippage)
@@ -155,7 +201,7 @@ class TradingBot:
         d = 1 if pf.qty > 0 else -1
         worst = low if d > 0 else high
         hit = lambda level, price: (price - level) * d <= 0   # koers voorbij niveau, tegen de positie in
-        sp = self.risk.stop_price(pf.entry, d)
+        sp = pf.stop
         liq = pf.liquidation_price(self.s.maintenance_margin)
         mm = self.s.maintenance_margin
         if liq is not None and hit(liq, sp):     # positie zo groot dat liquidatie eerder komt
@@ -177,7 +223,7 @@ class TradingBot:
         if pf.qty == 0:
             return 0.0
         d = 1 if pf.qty > 0 else -1
-        exit_price = self.risk.stop_price(pf.entry, d) * (1 - self.s.slippage * d)
+        exit_price = pf.stop * (1 - self.s.slippage * d)
         return -pf.qty * (exit_price - pf.entry) + abs(pf.qty) * exit_price * self.s.fee_rate
 
     def tick(self, price, t):
@@ -227,8 +273,6 @@ class TradingBot:
         chart = hist[::step]
         if hist and chart[-1] != hist[-1]:
             chart.append(hist[-1])
-        d = 1 if pf.qty > 0 else -1
-        sp = self.risk.stop_price(pf.entry, d)
         if self.risk.paused or self.risk.killed:
             state = "gestopt"
         elif self.risk_note:
@@ -257,14 +301,15 @@ class TradingBot:
             "entry": pf.entry,
             "leverage": self.s.leverage,
             "allow_short": self.s.allow_short,
-            "max_exposure": self.s.max_exposure,
             "risk_per_trade": self.s.risk_per_trade,
             "loss_at_stop": self._loss_at_stop(),
             "exposure": pf.exposure(price) if price else 0.0,
             "notional": pf.notional(price),
             "unrealized": pf.unrealized(price),
             "unrealized_pct": (price / pf.entry - 1) * 100 if pf.entry else 0.0,
-            "stop_price": sp,
+            "stop_price": pf.stop,
+            "stop_distance_now": self.stop_dist,
+            "size_now": self.s.size_for(self.stop_dist) if self.stop_dist else None,
             "liquidation_price": pf.liquidation_price(self.s.maintenance_margin),
             "fees": pf.fees,
             "funding": pf.funding,

@@ -31,10 +31,12 @@ class Settings:
     confidence: float = 1.0         # hoe zeker een strategie moet zijn (hoger = voorzichtiger)
 
     # Risico (de bot kan deze regels niet wegleren). Percentages van je eigen geld,
-    # behalve stop_loss: die gaat over de koers. Bij 5x kost 2% koersdaling 10% van je geld.
+    # behalve de stop-loss: die gaat over de koers.
     risk_per_trade: float = 0.02    # max 2% van je geld verliezen als de stop-loss geraakt wordt
-    stop_loss: float = 0.02         # koers 2% onder instapprijs -> sluiten
-    stop_cooldown: int = 6          # na stop-loss 6 candles niet kopen
+    stop_vol_mult: float = 2.0      # stop-loss = 2x de normale dagbeweging van de munt
+    stop_min: float = 0.01          # ... maar minstens 1%
+    stop_max: float = 0.15          # ... en hoogstens 15% van de instapprijs
+    stop_cooldown: int = 6          # na stop-loss 6 candles geen nieuwe positie
     daily_loss_limit: float = 0.15  # 15% verlies op een dag -> rest van de dag geen positie
     max_drawdown: float = 0.40      # 40% onder de piek -> bot stopt tot handmatige hervatting
 
@@ -42,15 +44,23 @@ class Settings:
     def interval_ms(self) -> int:
         return INTERVAL_MS[self.interval]
 
-    @property
-    def max_exposure(self) -> float:
-        """Grootste positie (x eigen geld) waarbij een stop-loss hoogstens risk_per_trade kost.
+    def stop_distance(self, vol_per_candle: float) -> float:
+        """Afstand van de stop-loss tot de instapprijs, op basis van de beweeglijkheid.
 
-        Verlies bij stop = positie x (koersdaling tot stop + fees en slippage bij in- en uitstappen).
-        Nooit meer dan de hefboom.
+        vol_per_candle is de standaardafwijking van de koersverandering per candle (laatste 48).
+        Omgerekend naar een dag: x wortel(candles per dag).
         """
-        loss_per_x = self.stop_loss + 2 * self.cost
-        return min(self.leverage, self.risk_per_trade / loss_per_x)
+        per_day = 86_400_000 / self.interval_ms
+        dist = self.stop_vol_mult * vol_per_candle * per_day ** 0.5
+        return min(self.stop_max, max(self.stop_min, dist))
+
+    def size_for(self, stop_distance: float) -> float:
+        """Positie (x eigen geld) waarbij een geraakte stop-loss hoogstens risk_per_trade kost.
+
+        Verlies bij stop = positie x (koersafstand tot stop + fees en slippage bij in- en uitstappen).
+        Ruimere stop = kleinere positie. Nooit meer dan de hefboom.
+        """
+        return min(self.leverage, self.risk_per_trade / (stop_distance + 2 * self.cost))
 
     @property
     def funding_per_candle(self) -> float:

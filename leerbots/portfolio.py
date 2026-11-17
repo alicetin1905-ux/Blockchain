@@ -20,6 +20,7 @@ class Portfolio:
         self.qty = 0.0
         self.entry = 0.0
         self.opened_t = None
+        self.stop = None          # stop-loss koers van de open positie
         self.fees = 0.0
         self.funding = 0.0
         self.n_trades = 0
@@ -57,8 +58,11 @@ class Portfolio:
         self.trades.append(trade)
         return trade
 
-    def open(self, direction, size, price, t, reason, strategy, fee, slip):
-        """Open een positie van `size` x equity. direction: +1 long, -1 short."""
+    def open(self, direction, size, price, t, reason, strategy, fee, slip, stop_distance):
+        """Open een positie van `size` x equity. direction: +1 long, -1 short.
+
+        De stop-loss ligt `stop_distance` (fractie) tegen de positie in vanaf de instapprijs.
+        """
         if self.qty != 0 or direction == 0:
             return None
         eq = self.equity(price)
@@ -69,6 +73,7 @@ class Portfolio:
         paid = notional * fee
         self.qty = direction * notional / fill
         self.entry = fill
+        self.stop = fill * (1 - direction * stop_distance)
         self.opened_t = t
         self.balance -= paid
         self.fees += paid
@@ -90,7 +95,7 @@ class Portfolio:
         net = pnl - getattr(self, "_open_fee", 0.0)   # resultaat van de hele trade incl. openingsfee
         self.wins += net > 0
         self.losses += net <= 0
-        self.qty, self.entry, self.opened_t = 0.0, 0.0, None
+        self.qty, self.entry, self.opened_t, self.stop = 0.0, 0.0, None, None
         return self._log({"t": t, "side": "SLUIT " + side, "price": fill, "qty": gross / fill, "usd": gross,
                           "fee": paid, "reason": reason, "strategy": strategy, "pnl": net})
 
@@ -110,7 +115,7 @@ class Portfolio:
                  "usd": abs(self.qty) * price, "fee": 0.0, "reason": "geliquideerd",
                  "strategy": strategy, "pnl": after - self.balance - getattr(self, "_open_fee", 0.0)}
         self.balance = after
-        self.qty, self.entry, self.opened_t = 0.0, 0.0, None
+        self.qty, self.entry, self.opened_t, self.stop = 0.0, 0.0, None, None
         self.liquidations += 1
         self.losses += 1
         return self._log(trade)

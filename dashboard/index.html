@@ -197,7 +197,7 @@ function card(b) {
         <div><span>Fees</span><b>${usd(b.fees)}</b></div>
         <div><span>Funding betaald</span><b>${usd(b.funding)}</b></div>
         <div><span>Verlies bij stop</span><b class="${b.loss_at_stop ? "down" : ""}">${b.loss_at_stop ? usd(-b.loss_at_stop) + " (" + (b.loss_at_stop / b.equity * 100).toFixed(1) + "%)" : "-"}</b></div>
-        <div><span>Grootte per trade</span><b>${b.max_exposure.toFixed(2)}x (max ${b.leverage}x)</b></div>
+        <div><span>Nieuwe trade nu</span><b>${b.size_now ? b.size_now.toFixed(2) + "x, stop " + (b.stop_distance_now * 100).toFixed(1) + "%" : "-"}</b></div>
       </div>
     </div>
 
