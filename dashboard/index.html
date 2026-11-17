@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leerbots</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f0f2f5; --line: #dfe3e8;
+  --text: #16191d; --muted: #66707b; --accent: #3a6df0;
+  --up: #12a150; --down: #d64545; --warn: #c98a00;
+  --eq: #3a6df0; --px: #9aa3ad;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1d232c; --line: #2a313b;
+    --text: #e6e9ed; --muted: #8b95a1; --accent: #6b93ff;
+    --up: #3ccf7c; --down: #ff6b6b; --warn: #f0b429;
+    --eq: #6b93ff; --px: #59626d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 16px; }
+.banner { background: var(--warn); color: #111; font-weight: 600; text-align: center;
+  padding: 6px 12px; border-radius: 8px; margin-bottom: 14px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; margin-bottom: 14px; }
+h1 { font-size: 22px; margin: 0; }
+.sub { color: var(--muted); }
+.totals { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 150px; }
+.tile .k { color: var(--muted); font-size: 12px; }
+.tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
+.head { display: flex; align-items: center; gap: 10px; }
+.head h2 { font-size: 17px; margin: 0; }
+.head .sym { color: var(--muted); font-size: 12px; }
+.head .price { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; }
+.pill.actief { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+.pill.geblokkeerd { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+.pill.gestopt { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+.big { display: flex; align-items: baseline; gap: 12px; margin: 10px 0 2px; flex-wrap: wrap; }
+.big .eq { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.up { color: var(--up); } .down { color: var(--down); } .muted { color: var(--muted); }
+canvas { width: 100%; height: 130px; display: block; margin: 8px 0 4px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+.section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+.kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; }
+.kv div span { display: block; color: var(--muted); font-size: 11px; }
+.kv div b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.bar { height: 6px; background: var(--panel-2); border-radius: 99px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td, th { padding: 4px 4px; text-align: right; white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 11px; }
+td:first-child, th:first-child { text-align: left; }
+tr.active td:first-child { font-weight: 700; color: var(--accent); }
+td.barcell { width: 30%; }
+.trades td { font-size: 12px; }
+.note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.err { background: color-mix(in srgb, var(--down) 15%, transparent); color: var(--down); padding: 8px 12px;
+  border-radius: 8px; margin-bottom: 12px; display: none; }
+.scroll { overflow-x: auto; }
+@media (max-width: 420px) { .grid { grid-template-columns: 1fr; } .kv { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner">PAPER TRADING: alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
+  <header>
+    <h1>Leerbots</h1>
+    <span class="sub" id="meta">verbinden...</span>
+  </header>
+  <div class="err" id="err"></div>
+  <div class="totals" id="totals"></div>
+  <div class="grid" id="bots"></div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const usd = (v) => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (v, d = 2) => (v > 0 ? "+" : "") + v.toFixed(d) + "%";
+const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "muted");
+const price = (v) => v >= 1000 ? v.toLocaleString("nl-NL", { maximumFractionDigits: 2 }) : v.toLocaleString("nl-NL", { maximumFractionDigits: 4 });
+const time = (t) => t ? new Date(t).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function skillText(m) {
+  if (!m || !m.samples) return "nog geen gelabelde voorbeelden";
+  const s = m.skill;
+  if (s > 0.02) return "voorspelt beter dan gokken";
+  if (s > -0.01) return "ongeveer gelijk aan gokken";
+  return "voorspelt nu slechter dan gokken (de strategiekiezer laat het model dan links liggen)";
+}
+
+function drawChart(canvas, pts) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement);
+  if (!pts || pts.length < 2) {
+    ctx.fillStyle = css.getPropertyValue("--muted");
+    ctx.font = "12px system-ui";
+    ctx.fillText("De grafiek begint zodra de bot live handelt.", 8, h / 2);
+    return;
+  }
+  const e0 = pts[0][1], p0 = pts[0][2];
+  const eq = pts.map((p) => (p[1] / e0 - 1) * 100);
+  const px = pts.map((p) => (p[2] / p0 - 1) * 100);
+  const all = eq.concat(px, [0]);
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (hi - lo < 1) { hi += 0.5; lo -= 0.5; }
+  const pad = 4;
+  const X = (i) => pad + (i / (pts.length - 1)) * (w - 2 * pad);
+  const Y = (v) => pad + (1 - (v - lo) / (hi - lo)) * (h - 2 * pad);
+  ctx.strokeStyle = css.getPropertyValue("--line"); ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(0, Y(0)); ctx.lineTo(w, Y(0)); ctx.stroke(); ctx.setLineDash([]);
+  const line = (vals, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    vals.forEach((v, i) => (i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v))));
+    ctx.stroke();
+  };
+  line(px, css.getPropertyValue("--px"), 1.2);
+  line(eq, css.getPropertyValue("--eq"), 2);
+}
+
+function card(b) {
+  const m = b.model.metrics || {};
+  const strat = b.strategies.map((s) => `
+    <tr class="${s.key === b.active_strategy ? "active" : ""}">
+      <td>${esc(s.label)}${s.position > 0 ? " ●" : ""}</td>
+      <td class="barcell"><div class="bar"><i style="width:${(s.prob * 100).toFixed(0)}%"></i></div></td>
+      <td>${(s.prob * 100).toFixed(0)}%</td>
+      <td class="${cls(s.mean_bps)}">${s.mean_bps.toFixed(1)}</td>
+      <td class="${cls(s.virtual_return_pct)}">${pct(s.virtual_return_pct, 1)}</td>
+    </tr>`).join("");
+  const trades = b.trades.slice(0, 8).map((t) => `
+    <tr><td>${time(t.t)}</td><td class="${t.side === "KOOP" ? "up" : "down"}">${t.side}</td>
+    <td>${price(t.price)}</td><td>${usd(t.usd)}</td>
+    <td class="${t.pnl == null ? "muted" : cls(t.pnl)}">${t.pnl == null ? "" : usd(t.pnl)}</td>
+    <td class="muted" style="text-align:left">${esc(t.reason)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">Nog geen trades.</td></tr>`;
+  const stopped = b.risk.paused || b.risk.killed;
+  return `
+  <div class="card">
+    <div class="head">
+      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)}</span>
+      <span class="pill ${b.risk.state}">${b.risk.state}</span>
+      <span class="price">$${price(b.price)}</span>
+    </div>
+    <div class="big">
+      <span class="eq">${usd(b.equity)}</span>
+      <span class="${cls(b.pnl)}">${pct(b.pnl_pct)} (${usd(b.pnl)})</span>
+    </div>
+    <div class="muted">Kopen en houden sinds start: <span class="${cls(b.buy_hold_pct)}">${pct(b.buy_hold_pct)}</span>
+      · max drawdown ${b.max_drawdown_pct.toFixed(1)}%</div>
+    <canvas data-sym="${esc(b.symbol)}"></canvas>
+    <div class="legend"><span><i style="background:var(--eq)"></i>bot</span><span><i style="background:var(--px)"></i>koers ${esc(b.symbol.replace("USDT", ""))}</span></div>
+    ${b.risk.note ? `<div class="note">Risicoregel actief: ${esc(b.risk.note)}</div>` : ""}
+
+    <div class="section">
+      <h3>Positie</h3>
+      <div class="kv">
+        <div><span>In de munt</span><b>${(b.exposure * 100).toFixed(0)}%</b></div>
+        <div><span>Instapprijs</span><b>${b.entry ? "$" + price(b.entry) : "-"}</b></div>
+        <div><span>Open resultaat</span><b class="${cls(b.unrealized_pct)}">${b.entry ? pct(b.unrealized_pct) : "-"}</b></div>
+        <div><span>Cash</span><b>${usd(b.cash)}</b></div>
+        <div><span>Stop-loss</span><b>${b.stop_price ? "$" + price(b.stop_price) : "-"}</b></div>
+        <div><span>Trades · fees</span><b>${b.n_trades} · ${usd(b.fees)}</b></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Wat de bot leert</h3>
+      <div class="note" style="margin:0 0 6px">Volgt nu: <b>${esc(b.active_label || "-")}</b>.
+        Balk = kans dat deze strategie nu echt de beste is. ● = strategie zou nu in de munt zitten.</div>
+      <div class="scroll"><table>
+        <tr><th>Strategie</th><th></th><th>beste</th><th>bps/candle</th><th>virtueel</th></tr>
+        ${strat}
+      </table></div>
+      <div class="kv" style="margin-top:10px">
+        <div><span>Model geleerd van</span><b>${b.model.updates.toLocaleString("nl-NL")}</b></div>
+        <div><span>Kans op stijging nu</span><b>${b.model.p == null ? "nog niet" : (b.model.p * 100).toFixed(0) + "%"}</b></div>
+        <div><span>Normaal</span><b>${(b.model.base_rate * 100).toFixed(0)}%</b></div>
+        <div><span>Trefzeker</span><b>${m.samples ? (m.accuracy * 100).toFixed(1) + "%" : "-"}</b></div>
+        <div><span>Altijd-hetzelfde</span><b>${m.samples ? (m.majority_accuracy * 100).toFixed(1) + "%" : "-"}</b></div>
+        <div><span>Modelscore</span><b class="${cls(m.skill || 0)}">${m.samples ? m.skill.toFixed(3) : "-"}</b></div>
+      </div>
+      <div class="note">${skillText(m)}</div>
+    </div>
+
+    <div class="section">
+      <h3>Laatste trades</h3>
+      <div class="scroll"><table class="trades">
+        <tr><th>Tijd</th><th>Zijde</th><th>Prijs</th><th>Bedrag</th><th>Resultaat</th><th style="text-align:left">Reden</th></tr>
+        ${trades}
+      </table></div>
+    </div>
+
+    <div class="section" style="display:flex;gap:8px;align-items:center">
+      ${stopped
+        ? `<button data-act="resume" data-sym="${esc(b.symbol)}">Hervatten</button><span class="note">Bot staat stil en zit in cash.</span>`
+        : `<button data-act="pause" data-sym="${esc(b.symbol)}">Stop en naar cash</button><span class="note">Verkoopt direct (paper) en pauzeert.</span>`}
+    </div>
+  </div>`;
+}
+
+let last = null;
+async function refresh() {
+  try {
+    const r = await fetch("/api/status", { cache: "no-store" });
+    const d = await r.json();
+    last = d;
+    const phase = { starten: "starten", opwarmen: "opwarmen: leert op geschiedenis", inhalen: "gemiste candles inhalen", live: "live" }[d.phase] || d.phase;
+    $("#meta").textContent = `${phase} · candles van ${d.interval} · bijgewerkt ${d.updated ? new Date(d.updated).toLocaleTimeString("nl-NL") : "-"}`;
+    $("#err").style.display = d.error ? "block" : "none";
+    $("#err").textContent = d.error ? "Geen verbinding met Binance: " + d.error : "";
+    const t = d.totals;
+    $("#totals").innerHTML = `
+      <div class="tile"><div class="k">Totaal (3 bots)</div><div class="v">${usd(t.equity)}</div></div>
+      <div class="tile"><div class="k">Resultaat</div><div class="v ${cls(t.pnl)}">${pct(t.pnl_pct)}</div></div>
+      <div class="tile"><div class="k">Startkapitaal</div><div class="v">${usd(t.start)}</div></div>`;
+    $("#bots").innerHTML = d.bots.length ? d.bots.map(card).join("") : `<div class="card muted">De bots warmen op. Dit duurt even.</div>`;
+    d.bots.forEach((b) => drawChart(document.querySelector(`canvas[data-sym="${b.symbol}"]`), b.chart));
+  } catch (e) {
+    $("#err").style.display = "block";
+    $("#err").textContent = "Dashboard kan de bots niet bereiken. Draait run.py nog?";
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  if (btn.dataset.act === "pause" && !confirm(`${btn.dataset.sym}: alles (paper) verkopen en de bot pauzeren?`)) return;
+  btn.disabled = true;
+  await fetch(`/api/bots/${btn.dataset.sym}/${btn.dataset.act}`, { method: "POST" });
+  refresh();
+});
+window.addEventListener("resize", () => last && last.bots.forEach((b) => drawChart(document.querySelector(`canvas[data-sym="${b.symbol}"]`), b.chart)));
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
