@@ -7,7 +7,7 @@ import time
 
 from . import binance
 from .bot import VERSION, TradingBot
-from .config import REFERENCE, SYMBOLS
+from .config import REFERENCE, SYMBOLS, describe_risk
 
 log = logging.getLogger("leerbots")
 
@@ -49,8 +49,9 @@ def _key(s):
 
 
 class App:
-    def __init__(self, settings, state_dir="state", warmup=3000):
-        self.s = settings
+    def __init__(self, settings_by_symbol, state_dir="state", warmup=3000):
+        self.per = settings_by_symbol             # Settings per munt (verschillen alleen in risico)
+        self.s = settings_by_symbol[REFERENCE]
         self.state_dir = state_dir
         self.state_file = os.path.join(state_dir, "bots.pkl")
         self.warmup = warmup
@@ -75,7 +76,7 @@ class App:
             with open(self.state_file, "rb") as f:
                 data = pickle.load(f)
             if (data.get("version") != VERSION or set(data["bots"]) != set(SYMBOLS)
-                    or any(_key(b.s) != _key(self.s) for b in data["bots"].values())):
+                    or any(_key(b.s) != _key(self.per[sym]) for sym, b in data["bots"].items())):
                 log.warning("Opgeslagen staat hoort bij een andere versie of andere instellingen; begin opnieuw.")
                 return False
             self.bots = data["bots"]
@@ -91,7 +92,7 @@ class App:
             self.phase = "inhalen"
             self.catch_up()
         else:
-            self.bots = {sym: TradingBot(sym, self.s, use_ref=sym != REFERENCE) for sym in SYMBOLS}
+            self.bots = {sym: TradingBot(sym, self.per[sym], use_ref=sym != REFERENCE) for sym in SYMBOLS}
             self.phase = "opwarmen"
             log.info("Nieuwe bots: opwarmen op %d candles geschiedenis (alleen leren)...", self.warmup)
             data = {sym: binance.history(sym, self.s.interval, self.warmup) for sym in SYMBOLS}
@@ -173,7 +174,9 @@ class App:
             "interval": self.s.interval,
             "updated": self.updated,
             "error": self.error,
-            "settings": {k: getattr(self.s, k) for k in self.s.__dataclass_fields__},
+            "settings": {**{k: getattr(self.s, k) for k in self.s.__dataclass_fields__},
+                         "risk_per_symbol": {s: st.risk_per_trade for s, st in self.per.items()},
+                         "risk_text": describe_risk(self.per)},
             "totals": {"start": start, "equity": equity,
                        "pnl": equity - start, "pnl_pct": (equity / start - 1) * 100 if start else 0},
             "bots": bots,

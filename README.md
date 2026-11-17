@@ -6,7 +6,7 @@ Standaard werkt elke bot zo:
 - hij krijgt **$500**;
 - hij kan **long en short**, zoals op een Binance USDT-futures account;
 - hij heeft **hoogstens één positie tegelijk**;
-- hij riskeert **maximaal 2% van zijn geld per trade**, met een hefboom van hoogstens 5x.
+- hij riskeert per trade maximaal **2% (BTC), 5% (ETH) of 10% (SOL)** van zijn geld, met een hefboom van hoogstens 5x.
 
 De simulatie rekent futures-fees, funding en liquidatie mee.
 
@@ -26,7 +26,7 @@ Open daarna **http://localhost:8000** voor het dashboard.
 - Opties:
   - `--capital 500`: startgeld per bot;
   - `--leverage 5`: maximale hefboom;
-  - `--risk 2`: max verlies per trade in %;
+  - `--risk BTC=2,ETH=5,SOL=10`: max verlies per trade in % per munt, of `--risk 5` voor alle munten;
   - `--no-short`: alleen long;
   - `--reset`: alles vergeten;
   - `--interval 15m`: andere candle-grootte;
@@ -41,7 +41,8 @@ Voor 24/7 laat je het draaien op een pc die aan blijft, een Raspberry Pi of een 
 ```bash
 python3 backtest.py                   # 180 dagen traden na 60 dagen opwarmen, uurcandles
 python3 backtest.py --periods 4       # 4 aparte periodes van 180 dagen: is het resultaat stabiel?
-python3 backtest.py --risk 5 --leverage 3
+python3 backtest.py --risk 5 --leverage 3   # 5% risico voor alle munten
+python3 backtest.py --risk BTC=2,ETH=5,SOL=10
 python3 backtest.py --from 2020 --to 2026 # elk kalenderjaar apart, met verse bots
 python3 backtest.py --no-short            # alleen long
 python3 backtest.py --stop-mult 3         # ruimere stop-loss (3x de dagbeweging)
@@ -148,6 +149,22 @@ Getest over 2020 tot 2026, elk kalenderjaar apart met verse bots van $500 (`pyth
 | 2026 (t/m nov) | -6% | -11% | -6% | -15% |
 | **Gemiddeld** | **+7%** | **+18%** | **-7%** | **-14%** |
 | Noodstop geraakt | 0 van 21 | 0 van 21 | 0 van 21 | 9 van 21 |
+
+Met risico per munt (BTC 2%, ETH 5%, SOL 10%, de standaard) en 10% voor alle munten:
+
+| Jaar | Alleen long, BTC 2 / ETH 5 / SOL 10 | Alleen long, alles 10% | Long + short, BTC 2 / ETH 5 / SOL 10 |
+|---|---|---|---|
+| 2020 | +18% | +69% | -12% |
+| 2021 | +167% | +173% | -16% |
+| 2022 | -3% | -13% | -16% |
+| 2023 | +21% | +25% | +1% |
+| 2024 | -7% | -16% | -27% |
+| 2025 | -12% | -18% | -22% |
+| 2026 (t/m nov) | -17% | -27% | -12% |
+| **Gemiddeld** | **+24%** | **+28%** | **-15%** |
+| Noodstop geraakt | 5 van 21 | 12 van 21 | 10 van 21 |
+
+Het gemiddelde van +24% komt bijna helemaal uit één jaar: SOL in 2021 (+451%, toen SOL zelf meer dan 100x steeg). Zonder 2021 is het gemiddelde ongeveer 0%, tegenover ongeveer +10% met 5% voor alle munten. De SOL-bot op 10% raakte in elk jaar van 2022 tot 2026 de noodstop. Ook in 2023, een sterk jaar voor SOL, verdiende hij met 10% minder (+30%) dan met 5% (+128%), omdat hij onderweg werd stilgelegd.
 
 Wat dit betekent:
 

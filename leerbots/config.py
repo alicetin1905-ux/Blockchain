@@ -1,9 +1,11 @@
 """Instellingen voor de bots. Pas hier risico, kosten en leertempo aan."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 REFERENCE = "BTCUSDT"  # ETH en SOL kijken ook naar wat BTC doet
 NAMES = {"BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana"}
+# Max verlies per trade (in % van het geld van die bot) als de stop-loss geraakt wordt.
+DEFAULT_RISK = {"BTCUSDT": 2.0, "ETHUSDT": 5.0, "SOLUSDT": 10.0}
 INTERVAL_MS = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}
 
 
@@ -70,3 +72,33 @@ class Settings:
     def cost(self) -> float:
         """Kosten per kant (fee + slippage) als fractie."""
         return self.fee_rate + self.slippage
+
+
+def parse_risk(text=None):
+    """Risico per munt als fractie. "5" = 5% voor alle munten, "BTC=2,ETH=5,SOL=10" = per munt.
+
+    Munten die niet genoemd worden houden DEFAULT_RISK.
+    """
+    if text is None or str(text).strip() == "":
+        return {s: DEFAULT_RISK[s] / 100 for s in SYMBOLS}
+    text = str(text)
+    if "=" not in text:
+        return {s: float(text) / 100 for s in SYMBOLS}
+    out = {s: DEFAULT_RISK[s] / 100 for s in SYMBOLS}
+    for part in text.split(","):
+        key, value = part.split("=")
+        sym = key.strip().upper()
+        sym = sym if sym.endswith("USDT") else sym + "USDT"
+        if sym not in SYMBOLS:
+            raise ValueError(f"onbekende munt: {key.strip()} (kies uit {', '.join(s[:-4] for s in SYMBOLS)})")
+        out[sym] = float(value) / 100
+    return out
+
+
+def per_symbol(base, risk):
+    """Eén Settings per munt: alles gelijk behalve het risico per trade."""
+    return {s: replace(base, risk_per_trade=risk[s]) for s in SYMBOLS}
+
+
+def describe_risk(settings_by_symbol):
+    return ", ".join(f"{s[:-4]} {st.risk_per_trade:.0%}" for s, st in settings_by_symbol.items())

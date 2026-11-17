@@ -10,7 +10,7 @@ import threading
 import time
 
 from leerbots.app import App
-from leerbots.config import INTERVAL_MS, Settings
+from leerbots.config import INTERVAL_MS, Settings, describe_risk, parse_risk, per_symbol
 from leerbots.server import make_server
 
 
@@ -21,8 +21,9 @@ def main():
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS), help="candle-grootte (standaard 1h)")
     ap.add_argument("--capital", type=float, default=500, help="nep-startgeld per bot in USD (standaard 500)")
     ap.add_argument("--leverage", type=float, default=5, help="maximale hefboom (standaard 5)")
-    ap.add_argument("--risk", type=float, default=Settings.risk_per_trade * 100,
-                    help="max verlies per trade in %% van je geld (standaard 2)")
+    ap.add_argument("--risk", default=None,
+                    help="max verlies per trade in %% van het geld van de bot: '5' voor alle munten of "
+                         "'BTC=2,ETH=5,SOL=10' per munt (standaard BTC 2, ETH 5, SOL 10)")
     ap.add_argument("--no-short", action="store_true", help="alleen long, niet shorten")
     ap.add_argument("--warmup", type=int, default=3000, help="candles geschiedenis om op te leren bij de start")
     ap.add_argument("--poll", type=float, default=10, help="seconden tussen koerscontroles")
@@ -33,12 +34,14 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     log = logging.getLogger("leerbots")
 
-    app = App(Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
-                       risk_per_trade=args.risk / 100, allow_short=not args.no_short),
-              args.state, args.warmup)
+    base = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
+                    allow_short=not args.no_short)
+    per = per_symbol(base, parse_risk(args.risk))
+    app = App(per, args.state, args.warmup)
     server = make_server(app, args.host, args.port)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log.info("Dashboard: http://%s:%d  (PAPER TRADING, geen echt geld)", args.host, args.port)
+    log.info("Risico per trade: %s. %s.", describe_risk(per), "Long en short" if base.allow_short else "Alleen long")
 
     app.start(reset=args.reset)
     log.info("Live. Elke %gs koersen controleren (stop-loss), elke %s een nieuwe candle.", args.poll, args.interval)

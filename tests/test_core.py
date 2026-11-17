@@ -5,7 +5,7 @@ import unittest
 from leerbots.app import feed
 from leerbots.bandit import DiscountedThompson
 from leerbots.bot import TradingBot
-from leerbots.config import Settings
+from leerbots.config import Settings, parse_risk, per_symbol
 from leerbots.model import OnlineLogReg
 from leerbots.portfolio import Portfolio
 from leerbots.risk import RiskManager
@@ -145,6 +145,21 @@ class RiskTest(unittest.TestCase):
         self.assertEqual(r.filter(1.0, 3)[0], 1.0)
         r.trigger_stop(10)
         self.assertEqual(r.filter(1.0, 12)[0], 0.0)
+
+
+class RiskPerSymbolTest(unittest.TestCase):
+    def test_parse_risk(self):
+        self.assertEqual(parse_risk(), {"BTCUSDT": 0.02, "ETHUSDT": 0.05, "SOLUSDT": 0.10})
+        self.assertEqual(parse_risk("5"), {"BTCUSDT": 0.05, "ETHUSDT": 0.05, "SOLUSDT": 0.05})
+        self.assertEqual(parse_risk("sol=3, BTC=1"), {"BTCUSDT": 0.01, "ETHUSDT": 0.05, "SOLUSDT": 0.03})
+        with self.assertRaises(ValueError):
+            parse_risk("DOGE=5")
+
+    def test_each_bot_gets_its_own_risk(self):
+        per = per_symbol(Settings(), parse_risk("BTC=2,ETH=5,SOL=10"))
+        self.assertEqual([per[s].risk_per_trade for s in ("BTCUSDT", "ETHUSDT", "SOLUSDT")], [0.02, 0.05, 0.10])
+        self.assertLess(per["BTCUSDT"].size_for(0.05), per["SOLUSDT"].size_for(0.05))
+        self.assertEqual(per["BTCUSDT"].interval, per["SOLUSDT"].interval)
 
 
 class BotTest(unittest.TestCase):

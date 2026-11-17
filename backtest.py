@@ -6,7 +6,8 @@ beslissing gebruikt alleen candles van vóór dat moment (walk-forward).
 
     python3 backtest.py                    # 180 dagen traden na 60 dagen opwarmen (1h-candles)
     python3 backtest.py --periods 4        # 4 aparte periodes van 180 dagen: is het resultaat stabiel?
-    python3 backtest.py --risk 5 --leverage 3
+    python3 backtest.py --risk 5 --leverage 3     # 5% risico voor alle munten
+    python3 backtest.py --risk BTC=2,ETH=5,SOL=10  # risico per munt (dit is ook de standaard)
     python3 backtest.py --from 2020 --to 2026   # elk kalenderjaar apart, met verse bots
     python3 backtest.py --no-short              # alleen long
     python3 backtest.py --offline          # gebruik eerder opgehaalde data in data/
@@ -19,7 +20,7 @@ import os
 from leerbots import binance
 from leerbots.app import feed
 from leerbots.bot import TradingBot
-from leerbots.config import INTERVAL_MS, REFERENCE, SYMBOLS, Settings
+from leerbots.config import INTERVAL_MS, REFERENCE, SYMBOLS, Settings, describe_risk, parse_risk, per_symbol
 
 
 def load_candles(interval, n, offline, cache_dir="data"):
@@ -41,20 +42,22 @@ def load_candles(interval, n, offline, cache_dir="data"):
     return out
 
 
-def run(candles, days, settings):
-    bots = {sym: TradingBot(sym, settings, use_ref=sym != REFERENCE) for sym in SYMBOLS}
+def run(candles, days, per):
+    """per = Settings per munt (zie per_symbol)."""
+    bots = {sym: TradingBot(sym, per[sym], use_ref=sym != REFERENCE) for sym in SYMBOLS}
     ref = candles[REFERENCE]
-    per_day = 86_400_000 // settings.interval_ms
+    per_day = 86_400_000 // per[REFERENCE].interval_ms
     trade_from = ref[max(0, len(ref) - days * per_day)]["t"]
     feed(bots, candles, trade_from)
     return bots
 
 
-def header(s):
+def header(per):
+    s = per[REFERENCE]
     print("=" * 84)
     sides = "long en short" if s.allow_short else "alleen long"
     print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, {sides}, 1 positie per munt,")
-    print(f"max {s.leverage:g}x hefboom, max {s.risk_per_trade:.0%} risico per trade,"
+    print(f"max {s.leverage:g}x hefboom, risico per trade: {describe_risk(per)},"
           f" stop-loss {s.stop_vol_mult:g}x de dagbeweging ({s.stop_min:.0%}-{s.stop_max:.0%})")
     print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, funding {s.funding_8h:.2%}/8u meegerekend)")
     print("=" * 84)
@@ -65,7 +68,7 @@ def _skill(m):
 
 
 def report(bots):
-    header(next(iter(bots.values())).s)
+    header({sym: b.s for sym, b in bots.items()})
     total_start = total_eq = 0.0
     for sym, bot in bots.items():
         st = bot.status()
@@ -90,16 +93,17 @@ def report(bots):
     print("Let op: resultaten uit het verleden zeggen weinig over de toekomst.")
 
 
-def run_periods(candles, periods, days, warmup_days, settings):
+def run_periods(candles, periods, days, warmup_days, per):
     """Test dezelfde instellingen op meerdere aparte periodes na elkaar."""
+    settings = per[REFERENCE]
     per_day = 86_400_000 // settings.interval_ms
     warm, span = warmup_days * per_day, days * per_day
-    header(settings)
+    header(per)
     print(f"\n{'Periode':21}" + "".join(f"{s.replace('USDT', ''):>20}" for s in SYMBOLS) + f"{'Totaal':>10}")
     totals, stops = [], 0
     for i in range(periods):
         window = {s: ks[i * span:i * span + warm + span] for s, ks in candles.items()}
-        bots = run(window, days, settings)
+        bots = run(window, days, per)
         ref = window[REFERENCE]
         fmt = lambda t: dt.datetime.fromtimestamp(t / 1000, dt.timezone.utc).strftime("%b %Y")
         row, eq = f"{fmt(ref[warm]['t'])} - {fmt(ref[-1]['t'])}", 0.0
@@ -136,9 +140,9 @@ def load_years(interval, first, last, warmup_days, offline, cache_dir="data"):
     return out
 
 
-def run_years(candles, first, last, warmup_days, settings):
+def run_years(candles, first, last, warmup_days, per):
     """Elk kalenderjaar apart: verse bots die eerst `warmup_days` voor 1 januari leren."""
-    header(settings)
+    header(per)
     warm = warmup_days * 86_400_000
     print(f"\n{'Jaar':10}" + "".join(f"{s.replace('USDT', ''):>21}" for s in SYMBOLS) + f"{'Totaal':>10}")
     totals, stops, n = [], 0, 0
@@ -149,7 +153,7 @@ def run_years(candles, first, last, warmup_days, settings):
         window = {s: ks for s, ks in window.items() if ks}
         if REFERENCE not in window:
             continue
-        bots = {sym: TradingBot(sym, settings, use_ref=sym != REFERENCE) for sym in window}
+        bots = {sym: TradingBot(sym, per[sym], use_ref=sym != REFERENCE) for sym in window}
         feed(bots, window, y0)
         cells, eq, start = [], 0.0, 0.0
         for sym in SYMBOLS:
@@ -177,7 +181,8 @@ def main():
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS))
     ap.add_argument("--capital", type=float, default=500)
     ap.add_argument("--leverage", type=float, default=5)
-    ap.add_argument("--risk", type=float, default=Settings.risk_per_trade * 100, help="max verlies per trade in %%")
+    ap.add_argument("--risk", default=None,
+                    help="max verlies per trade in %%: '5' voor alle munten of 'BTC=2,ETH=5,SOL=10' per munt")
     ap.add_argument("--days", type=int, default=180, help="dagen waarin getraded wordt (per periode)")
     ap.add_argument("--warmup-days", type=int, default=60, help="dagen vooraf om alleen te leren")
     ap.add_argument("--periods", type=int, default=1, help="aantal aparte periodes na elkaar")
@@ -189,20 +194,20 @@ def main():
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     args = ap.parse_args()
     settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
-                        risk_per_trade=args.risk / 100, allow_short=not args.no_short,
-                        stop_vol_mult=args.stop_mult)
+                        allow_short=not args.no_short, stop_vol_mult=args.stop_mult)
+    per = per_symbol(settings, parse_risk(args.risk))
     if args.first:
         last = args.last or dt.datetime.now(dt.timezone.utc).year
         candles = load_years(args.interval, args.first, last, args.warmup_days, args.offline)
-        run_years(candles, args.first, last, args.warmup_days, settings)
+        run_years(candles, args.first, last, args.warmup_days, per)
         return
     per_day = 86_400_000 // settings.interval_ms
     n = (args.warmup_days + args.periods * args.days) * per_day
     candles = load_candles(args.interval, n, args.offline)
     if args.periods > 1:
-        run_periods(candles, args.periods, args.days, args.warmup_days, settings)
+        run_periods(candles, args.periods, args.days, args.warmup_days, per)
     else:
-        report(run(candles, args.days, settings))
+        report(run(candles, args.days, per))
 
 
 if __name__ == "__main__":
