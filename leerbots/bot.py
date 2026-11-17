@@ -1,12 +1,13 @@
 """Eén zelflerende bot per munt.
 
 Per afgesloten candle:
-  1. stop-loss controleren
+  1. stop-loss en liquidatie controleren
   2. elke strategie belonen voor wat ze virtueel verdiende (na kosten)
   3. het model laten leren van voorspellingen waarvan de uitkomst nu bekend is
   4. nieuwe signalen en een nieuwe voorspelling maken
   5. om de paar candles via de strategiekiezer bepalen welke strategie de bot volgt
-  6. de risicoregels toepassen en (paper) traden
+  6. de risicoregels toepassen en (paper) traden: long, short of niets,
+     met hoogstens één positie tegelijk
 """
 import math
 import random
@@ -20,7 +21,7 @@ from .portfolio import Portfolio
 from .risk import RiskManager
 from .strategies import KEYS, STRATEGIES
 
-VERSION = 2
+VERSION = 3
 
 
 class TradingBot:
@@ -29,9 +30,11 @@ class TradingBot:
         self.symbol = symbol
         self.s = settings
         self.engine = FeatureEngine(use_ref)
-        self.model = OnlineLogReg(len(self.engine.names), settings.learning_rate, settings.l2)
+        n = len(self.engine.names)
+        self.model_up = OnlineLogReg(n, settings.learning_rate, settings.l2)    # kans op stijging
+        self.model_down = OnlineLogReg(n, settings.learning_rate, settings.l2)  # kans op daling
         self.bandit = DiscountedThompson(KEYS, settings.bandit_discount)
-        self.virt = {k: 0.0 for k in KEYS}        # virtuele blootstelling per strategie
+        self.virt = {k: 0 for k in KEYS}          # virtuele richting per strategie (+1, 0, -1)
         self.virt_cost = {k: 0.0 for k in KEYS}
         self.active = None
         self.last_decision = -10 ** 9
@@ -63,13 +66,14 @@ class TradingBot:
         pf = self.portfolio
 
         if trade:
-            self._check_exits(k["o"], k["l"], k["t"])
+            self._check_exits(k["o"], k["h"], k["l"], k["t"])
             pf.charge_funding(c, self.s.funding_per_candle)
 
         if self.prev_close:
-            ret = math.log(c / self.prev_close)
+            ret = c / self.prev_close - 1
             fund = self.s.funding_per_candle
-            self.bandit.update({a: 1e4 * (self.virt[a] * (ret - fund) - self.virt_cost[a]) for a in KEYS})
+            self.bandit.update({a: 1e4 * (self.virt[a] * ret - abs(self.virt[a]) * fund - self.virt_cost[a])
+                                for a in KEYS})
         self.virt_cost = {a: 0.0 for a in KEYS}
         self.prev_close = c
 
@@ -79,18 +83,23 @@ class TradingBot:
                 self._record(k["t"], c)
             return None
 
-        threshold = 2 * self.s.cost  # stijging moet koop- en verkoopkosten dekken
+        threshold = 2 * self.s.cost  # beweging moet in- en uitstapkosten dekken
         while self.pending and self.pending[0][0] + self.s.horizon <= self.index:
             _, x_old, c_old = self.pending.popleft()
-            self.model.update(x_old, 1 if math.log(c / c_old) > threshold else 0)
+            move = math.log(c / c_old)
+            self.model_up.update(x_old, 1 if move > threshold else 0)
+            self.model_down.update(x_old, 1 if move < -threshold else 0)
 
         x = feats["x"]
-        self.model.observe(x)
-        self.p = self.model.predict(x) if self.model.updates >= self.s.min_model_updates else None
+        self.model_up.observe(x)
+        self.model_down.observe(x)
+        ready = min(self.model_up.updates, self.model_down.updates) >= self.s.min_model_updates
+        self.p = (self.model_up.predict(x), self.model_down.predict(x)) if ready else None
         self.pending.append((self.index, x, c))
+        base = (self.model_up.base_rate, self.model_down.base_rate)
 
         for a in KEYS:
-            new = STRATEGIES[a][1](feats["ind"], self.virt[a], self.p, self.model.base_rate)
+            new = STRATEGIES[a][1](feats["ind"], self.virt[a], self.p, base)
             self.virt_cost[a] = self.s.cost * abs(new - self.virt[a])
             self.virt[a] = new
 
@@ -116,57 +125,68 @@ class TradingBot:
 
     # ---------------------------------------------------------------- traden
     def _trade(self, k):
+        """Eén positie tegelijk: openen, aanhouden of sluiten. Nooit bijkopen of half afbouwen."""
         pf, price = self.portfolio, k["c"]
         if self.start_price is None:
             self.start_price, self.start_t = price, k["t"]
         self.risk.on_candle(k["t"], pf.equity(price))
         self.active_counts[self.active] += 1
-        target, self.risk_note = self.risk.filter(self.virt[self.active] * self.s.max_exposure, self.index)
-        cur = pf.exposure(price)
-        if (target <= 0 and pf.qty > 0) or abs(target - cur) >= self.s.min_rebalance * self.s.max_exposure:
-            reason = self.risk_note or STRATEGIES[self.active][0]
-            pf.rebalance(target, price, k["t"], reason, self.active, self.s.fee_rate, self.s.slippage)
+        want, self.risk_note = self.risk.filter(self.virt[self.active], self.index)
+        want = (want > 0) - (want < 0)
+        have = (pf.qty > 0) - (pf.qty < 0)
+        reason = self.risk_note or STRATEGIES[self.active][0]
+        if have and want != have:
+            self._close(price, k["t"], reason)
+            have = 0
+        if want and not have:
+            pf.open(want, self.s.max_exposure, price, k["t"], reason, self.active,
+                    self.s.fee_rate, self.s.slippage)
 
-    def _sell_all(self, price, t, reason):
-        self.portfolio.rebalance(0.0, price, t, reason, self.active, self.s.fee_rate, self.s.slippage)
+    def _close(self, price, t, reason):
+        self.portfolio.close(price, t, reason, self.active, self.s.fee_rate, self.s.slippage)
 
-    def _check_exits(self, open_, low, t):
-        """Stop-loss en liquidatie. De koers loopt van open naar low; wat eerst geraakt wordt telt."""
+    def _check_exits(self, open_, high, low, t):
+        """Stop-loss en liquidatie. De koers loopt van open naar het slechtste punt; wat eerst geraakt wordt telt."""
         pf = self.portfolio
-        if pf.qty <= 0:
+        if pf.qty == 0:
             return
-        sp = self.risk.stop_price(pf.entry)
+        d = 1 if pf.qty > 0 else -1
+        worst = low if d > 0 else high
+        hit = lambda level, price: (price - level) * d <= 0   # koers voorbij niveau, tegen de positie in
+        sp = self.risk.stop_price(pf.entry, d)
         liq = pf.liquidation_price(self.s.maintenance_margin)
-        if liq is not None and liq >= sp:      # positie zo groot dat liquidatie eerder komt
+        mm = self.s.maintenance_margin
+        if liq is not None and hit(liq, sp):     # positie zo groot dat liquidatie eerder komt
             sp = None
-        if liq is not None and open_ <= liq:
-            pf.liquidate(open_, t, self.active, self.s.maintenance_margin)
-        elif sp is not None and open_ <= sp:
-            self._sell_all(open_, t, "stop-loss")
+        if liq is not None and hit(liq, open_):
+            pf.liquidate(open_, t, self.active, mm)
+        elif sp is not None and hit(sp, open_):
+            self._close(open_, t, "stop-loss")
             self.risk.trigger_stop(self.index)
-        elif sp is not None and low <= sp:
-            self._sell_all(sp, t, "stop-loss")
+        elif sp is not None and hit(sp, worst):
+            self._close(sp, t, "stop-loss")
             self.risk.trigger_stop(self.index)
-        elif liq is not None and low <= liq:
-            pf.liquidate(liq, t, self.active, self.s.maintenance_margin)
+        elif liq is not None and hit(liq, worst):
+            pf.liquidate(liq, t, self.active, mm)
 
     def _loss_at_stop(self):
         """Wat de open positie kost (t.o.v. de instap) als de stop-loss geraakt wordt."""
         pf = self.portfolio
-        if pf.qty <= 0:
+        if pf.qty == 0:
             return 0.0
-        exit_price = self.risk.stop_price(pf.entry) * (1 - self.s.slippage)
-        return pf.qty * (pf.entry - exit_price) + pf.qty * exit_price * self.s.fee_rate
+        d = 1 if pf.qty > 0 else -1
+        exit_price = self.risk.stop_price(pf.entry, d) * (1 - self.s.slippage * d)
+        return -pf.qty * (exit_price - pf.entry) + abs(pf.qty) * exit_price * self.s.fee_rate
 
     def tick(self, price, t):
         """Live koers tussen candles door: stop-loss en liquidatie direct uitvoeren."""
         self.last_price = price
-        self._check_exits(price, price, t)
+        self._check_exits(price, price, price, t)
 
     def pause(self, t):
         self.risk.paused = True
-        if self.portfolio.qty > 0 and self.last_price:
-            self._sell_all(self.last_price, t, "handmatig gepauzeerd")
+        if self.portfolio.qty != 0 and self.last_price:
+            self._close(self.last_price, t, "handmatig gepauzeerd")
 
     def resume(self):
         self.risk.resume(self.portfolio.equity(self.last_price or 0))
@@ -179,6 +199,10 @@ class TradingBot:
             self.max_dd = max(self.max_dd, 1 - eq / self.peak_equity)
 
     # ---------------------------------------------------------------- status
+    def _model_status(self, m, i):
+        return {"updates": m.updates, "p": self.p[i] if self.p else None, "base_rate": m.base_rate,
+                "metrics": m.metrics(), "top_weights": m.top_weights(self.engine.names)}
+
     def status(self, chart_points=600):
         pf = self.portfolio
         price = self.last_price or 0.0
@@ -201,7 +225,8 @@ class TradingBot:
         chart = hist[::step]
         if hist and chart[-1] != hist[-1]:
             chart.append(hist[-1])
-        sp = self.risk.stop_price(pf.entry)
+        d = 1 if pf.qty > 0 else -1
+        sp = self.risk.stop_price(pf.entry, d)
         if self.risk.paused or self.risk.killed:
             state = "gestopt"
         elif self.risk_note:
@@ -223,6 +248,10 @@ class TradingBot:
             "trading_since": self.start_t,
             "balance": pf.balance,
             "qty": pf.qty,
+            "side": pf.side,
+            "opened": pf.opened_t,
+            "wins": pf.wins,
+            "losses": pf.losses,
             "entry": pf.entry,
             "leverage": self.s.leverage,
             "max_exposure": self.s.max_exposure,
@@ -243,12 +272,9 @@ class TradingBot:
             "active_label": STRATEGIES[self.active][0] if self.active else None,
             "strategies": strategies,
             "model": {
-                "updates": self.model.updates,
                 "ready": self.p is not None,
-                "p": self.p,
-                "base_rate": self.model.base_rate,
-                "metrics": self.model.metrics(),
-                "top_weights": self.model.top_weights(self.engine.names),
+                "up": self._model_status(self.model_up, 0),
+                "down": self._model_status(self.model_down, 1),
             },
             "risk": {"state": state, "note": self.risk_note, "paused": self.risk.paused,
                      "killed": self.risk.killed},

@@ -74,7 +74,7 @@ button:hover { border-color: var(--accent); }
 </head>
 <body>
 <div class="wrap">
-  <div class="banner">PAPER TRADING met hefboom: alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
+  <div class="banner">PAPER TRADING (long en short): alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
   <header>
     <h1>Leerbots</h1>
     <span class="sub" id="meta">verbinden...</span>
@@ -134,18 +134,33 @@ function drawChart(canvas, pts) {
   line(eq, css.getPropertyValue("--eq"), 2);
 }
 
+const dir = (v) => (v > 0 ? ' <span class="up">▲</span>' : v < 0 ? ' <span class="down">▼</span>' : "");
+const sideCls = (side) => (/LONG/.test(side) ? "up" : "down");
+
+function modelRows(label, m) {
+  const x = m.metrics || {};
+  return `
+    <tr><td>${label}</td>
+      <td>${m.p == null ? "nog niet" : (m.p * 100).toFixed(0) + "%"}</td>
+      <td>${(m.base_rate * 100).toFixed(0)}%</td>
+      <td>${x.samples ? (x.accuracy * 100).toFixed(1) + "%" : "-"}</td>
+      <td>${x.samples ? (x.majority_accuracy * 100).toFixed(1) + "%" : "-"}</td>
+      <td class="${cls(x.skill || 0)}">${x.samples ? x.skill.toFixed(3) : "-"}</td></tr>`;
+}
+
 function card(b) {
-  const m = b.model.metrics || {};
+  const up = b.model.up, down = b.model.down;
+  const best = Math.max(up.metrics.skill ?? -1, down.metrics.skill ?? -1);
   const strat = b.strategies.map((s) => `
     <tr class="${s.key === b.active_strategy ? "active" : ""}">
-      <td>${esc(s.label)}${s.position > 0 ? " ●" : ""}</td>
+      <td>${esc(s.label)}${dir(s.position)}</td>
       <td class="barcell"><div class="bar"><i style="width:${(s.prob * 100).toFixed(0)}%"></i></div></td>
       <td>${(s.prob * 100).toFixed(0)}%</td>
       <td class="${cls(s.mean_bps)}">${s.mean_bps.toFixed(1)}</td>
       <td class="${cls(s.virtual_return_pct)}">${pct(s.virtual_return_pct, 1)}</td>
     </tr>`).join("");
   const trades = b.trades.slice(0, 8).map((t) => `
-    <tr><td>${time(t.t)}</td><td class="${t.side === "KOOP" ? "up" : "down"}">${t.side === "LIQUIDATIE" ? "<b>LIQUIDATIE</b>" : t.side}</td>
+    <tr><td>${time(t.t)}</td><td class="${sideCls(t.side)}">${t.side.startsWith("LIQUIDATIE") ? "<b>" + esc(t.side) + "</b>" : esc(t.side)}</td>
     <td>${price(t.price)}</td><td>${usd(t.usd)}</td>
     <td class="${t.pnl == null ? "muted" : cls(t.pnl)}">${t.pnl == null ? "" : usd(t.pnl)}</td>
     <td class="muted" style="text-align:left">${esc(t.reason)}</td></tr>`).join("")
@@ -154,7 +169,7 @@ function card(b) {
   return `
   <div class="card">
     <div class="head">
-      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · max ${b.leverage}x · ${(b.risk_per_trade * 100).toFixed(0)}% risico</span>
+      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · long/short · ${(b.risk_per_trade * 100).toFixed(0)}% risico per trade</span>
       <span class="pill ${b.risk.state}">${b.risk.state}</span>
       <span class="price">$${price(b.price)}</span>
     </div>
@@ -171,37 +186,35 @@ function card(b) {
     <div class="section">
       <h3>Positie</h3>
       <div class="kv">
-        <div><span>Hefboom nu</span><b>${b.exposure.toFixed(1)}x / ${b.max_exposure.toFixed(1)}x</b></div>
+        <div><span>Positie</span><b class="${b.side ? sideCls(b.side) : ""}">${b.side ? b.side + " " + Math.abs(b.exposure).toFixed(1) + "x" : "geen"}</b></div>
         <div><span>Positiegrootte</span><b>${b.notional ? usd(b.notional) : "-"}</b></div>
         <div><span>Instapprijs</span><b>${b.entry ? "$" + price(b.entry) : "-"}</b></div>
         <div><span>Open resultaat</span><b class="${cls(b.unrealized)}">${b.entry ? usd(b.unrealized) + " (koers " + pct(b.unrealized_pct) + ")" : "-"}</b></div>
         <div><span>Stop-loss</span><b>${b.stop_price ? "$" + price(b.stop_price) : "-"}</b></div>
         <div><span>Liquidatie</span><b class="down">${b.liquidation_price ? "$" + price(b.liquidation_price) : "-"}</b></div>
         <div><span>Saldo</span><b>${usd(b.balance)}</b></div>
-        <div><span>Trades · fees</span><b>${b.n_trades} · ${usd(b.fees)}</b></div>
+        <div><span>Gewonnen · verloren</span><b>${b.wins} · ${b.losses}</b></div>
+        <div><span>Fees</span><b>${usd(b.fees)}</b></div>
         <div><span>Funding betaald</span><b>${usd(b.funding)}</b></div>
         <div><span>Verlies bij stop</span><b class="${b.loss_at_stop ? "down" : ""}">${b.loss_at_stop ? usd(-b.loss_at_stop) + " (" + (b.loss_at_stop / b.equity * 100).toFixed(1) + "%)" : "-"}</b></div>
-        <div><span>Max risico per trade</span><b>${(b.risk_per_trade * 100).toFixed(0)}%</b></div>
+        <div><span>Grootte per trade</span><b>${b.max_exposure.toFixed(2)}x (max ${b.leverage}x)</b></div>
       </div>
     </div>
 
     <div class="section">
       <h3>Wat de bot leert</h3>
       <div class="note" style="margin:0 0 6px">Volgt nu: <b>${esc(b.active_label || "-")}</b>.
-        Balk = kans dat deze strategie nu echt de beste is. ● = strategie zou nu in de munt zitten.</div>
+        Balk = kans dat deze strategie nu echt de beste is. ▲ = zou nu long zitten, ▼ = short.</div>
       <div class="scroll"><table>
         <tr><th>Strategie</th><th></th><th>beste</th><th>bps/candle</th><th>virtueel</th></tr>
         ${strat}
       </table></div>
-      <div class="kv" style="margin-top:10px">
-        <div><span>Model geleerd van</span><b>${b.model.updates.toLocaleString("nl-NL")}</b></div>
-        <div><span>Kans op stijging nu</span><b>${b.model.p == null ? "nog niet" : (b.model.p * 100).toFixed(0) + "%"}</b></div>
-        <div><span>Normaal</span><b>${(b.model.base_rate * 100).toFixed(0)}%</b></div>
-        <div><span>Trefzeker</span><b>${m.samples ? (m.accuracy * 100).toFixed(1) + "%" : "-"}</b></div>
-        <div><span>Altijd-hetzelfde</span><b>${m.samples ? (m.majority_accuracy * 100).toFixed(1) + "%" : "-"}</b></div>
-        <div><span>Modelscore</span><b class="${cls(m.skill || 0)}">${m.samples ? m.skill.toFixed(3) : "-"}</b></div>
-      </div>
-      <div class="note">${skillText(m)}</div>
+      <div class="scroll" style="margin-top:10px"><table>
+        <tr><th>Model</th><th>kans nu</th><th>normaal</th><th>trefzeker</th><th>altijd-zelfde</th><th>score</th></tr>
+        ${modelRows("Stijging", up)}
+        ${modelRows("Daling", down)}
+      </table></div>
+      <div class="note">Geleerd van ${up.updates.toLocaleString("nl-NL")} voorbeelden. Beste model: ${skillText({ samples: up.metrics.samples, skill: best })}</div>
     </div>
 
     <div class="section">

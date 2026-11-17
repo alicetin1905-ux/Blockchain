@@ -21,7 +21,8 @@ def main():
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS), help="candle-grootte (standaard 1h)")
     ap.add_argument("--capital", type=float, default=500, help="nep-startgeld per bot in USD (standaard 500)")
     ap.add_argument("--leverage", type=float, default=5, help="maximale hefboom (standaard 5)")
-    ap.add_argument("--risk", type=float, default=10, help="max verlies per trade in %% van je geld (standaard 10)")
+    ap.add_argument("--risk", type=float, default=Settings.risk_per_trade * 100,
+                    help="max verlies per trade in %% van je geld (standaard 2)")
     ap.add_argument("--warmup", type=int, default=3000, help="candles geschiedenis om op te leren bij de start")
     ap.add_argument("--poll", type=float, default=10, help="seconden tussen koerscontroles")
     ap.add_argument("--state", default="state", help="map waar de bots hun geheugen opslaan")

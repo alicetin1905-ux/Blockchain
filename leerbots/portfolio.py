@@ -1,12 +1,16 @@
-"""Nep-portemonnee (paper trading) met hefboom, zoals een Binance USDT-futures account.
+"""Nep-portemonnee (paper trading) zoals een Binance USDT-futures account.
 
-- balance: je inleg plus gerealiseerde winst/verlies, min fees en funding
-- qty/entry: de open long-positie in de munt
+- Eén positie tegelijk: long (qty > 0) of short (qty < 0). Geen bijkopen of
+  gedeeltelijk afbouwen: een positie wordt in één keer geopend en in één keer gesloten.
+- balance: inleg plus gerealiseerde winst/verlies, min fees en funding
 - equity: balance plus open winst/verlies
-- exposure: positiegrootte gedeeld door equity (1.0 = 1x, 5.0 = 5x hefboom)
-Met hefboom 1 gedraagt dit zich als gewoon kopen en verkopen.
+- exposure: positiegrootte / equity, met teken (+4.7 = long 4.7x, -4.7 = short 4.7x)
 """
 from collections import deque
+
+
+def side_of(qty):
+    return "LONG" if qty > 0 else "SHORT" if qty < 0 else None
 
 
 class Portfolio:
@@ -15,17 +19,24 @@ class Portfolio:
         self.balance = cash
         self.qty = 0.0
         self.entry = 0.0
+        self.opened_t = None
         self.fees = 0.0
         self.funding = 0.0
         self.n_trades = 0
         self.liquidations = 0
+        self.wins = 0
+        self.losses = 0
         self.trades = deque(maxlen=300)
+
+    @property
+    def side(self):
+        return side_of(self.qty)
 
     def equity(self, price):
         return self.balance + self.qty * (price - self.entry)
 
     def notional(self, price):
-        return self.qty * price
+        return abs(self.qty) * price
 
     def exposure(self, price):
         eq = self.equity(price)
@@ -35,10 +46,10 @@ class Portfolio:
         return self.qty * (price - self.entry)
 
     def liquidation_price(self, mm):
-        """Koers waarop equity gelijk is aan de onderhoudsmarge (None = kan niet geliquideerd worden)."""
-        if self.qty <= 0:
+        """Koers waarop equity gelijk is aan de onderhoudsmarge (None = geen positie of onmogelijk)."""
+        if self.qty == 0:
             return None
-        p = (self.qty * self.entry - self.balance) / (self.qty * (1 - mm))
+        p = (self.qty * self.entry - self.balance) / (self.qty - mm * abs(self.qty))
         return p if p > 0 else None
 
     def _log(self, trade):
@@ -46,53 +57,60 @@ class Portfolio:
         self.trades.append(trade)
         return trade
 
-    def rebalance(self, target, price, t, reason, strategy, fee, slip):
-        """Breng de blootstelling naar `target` (0 = geen positie, 5 = 5x). Geeft de trade terug of None."""
-        eq = self.equity(price)
-        if eq <= 0:
+    def open(self, direction, size, price, t, reason, strategy, fee, slip):
+        """Open een positie van `size` x equity. direction: +1 long, -1 short."""
+        if self.qty != 0 or direction == 0:
             return None
-        cur = self.exposure(price)
-        if target > cur:
-            add = (target - cur) * eq
-            if add < 1:
-                return None
-            fill = price * (1 + slip)
-            qty = add / fill
-            paid = add * fee
-            self.entry = (self.entry * self.qty + fill * qty) / (self.qty + qty)
-            self.qty += qty
-            self.balance -= paid
-            self.fees += paid
-            return self._log({"t": t, "side": "KOOP", "price": fill, "qty": qty, "usd": add,
-                              "fee": paid, "reason": reason, "strategy": strategy, "pnl": None})
-        if target < cur and self.qty > 0:
-            qty = self.qty if target <= 0 else min(self.qty, (cur - target) * eq / price)
-            fill = price * (1 - slip)
-            gross = qty * fill
-            paid = gross * fee
-            pnl = qty * (fill - self.entry) - paid
-            self.balance += pnl
-            self.fees += paid
-            self.qty -= qty
-            if self.qty * price < 1e-6:
-                self.qty, self.entry = 0.0, 0.0
-            return self._log({"t": t, "side": "VERKOOP", "price": fill, "qty": qty, "usd": gross,
-                              "fee": paid, "reason": reason, "strategy": strategy, "pnl": pnl})
-        return None
+        eq = self.equity(price)
+        notional = size * eq
+        if eq <= 0 or notional < 1:
+            return None
+        fill = price * (1 + slip * direction)       # slippage altijd in je nadeel
+        paid = notional * fee
+        self.qty = direction * notional / fill
+        self.entry = fill
+        self.opened_t = t
+        self.balance -= paid
+        self.fees += paid
+        self._open_fee = paid
+        return self._log({"t": t, "side": "OPEN " + self.side, "price": fill, "qty": abs(self.qty),
+                          "usd": notional, "fee": paid, "reason": reason, "strategy": strategy, "pnl": None})
+
+    def close(self, price, t, reason, strategy, fee, slip):
+        if self.qty == 0:
+            return None
+        side = self.side
+        direction = 1 if self.qty > 0 else -1
+        fill = price * (1 - slip * direction)
+        gross = abs(self.qty) * fill
+        paid = gross * fee
+        pnl = self.qty * (fill - self.entry) - paid
+        self.balance += pnl
+        self.fees += paid
+        net = pnl - getattr(self, "_open_fee", 0.0)   # resultaat van de hele trade incl. openingsfee
+        self.wins += net > 0
+        self.losses += net <= 0
+        self.qty, self.entry, self.opened_t = 0.0, 0.0, None
+        return self._log({"t": t, "side": "SLUIT " + side, "price": fill, "qty": gross / fill, "usd": gross,
+                          "fee": paid, "reason": reason, "strategy": strategy, "pnl": net})
 
     def charge_funding(self, price, rate):
-        if self.qty > 0 and rate:
-            cost = self.qty * price * rate
+        """Funding over de positiegrootte. Voorzichtig gerekend: long én short betalen."""
+        if self.qty != 0 and rate:
+            cost = abs(self.qty) * price * rate
             self.balance -= cost
             self.funding += cost
 
     def liquidate(self, price, t, strategy, mm):
         """Gedwongen sluiting door de beurs. De resterende marge gaat verloren."""
+        side = self.side
         eq = self.equity(price)
-        pnl = eq - self.balance - self.qty * price * mm
-        trade = {"t": t, "side": "LIQUIDATIE", "price": price, "qty": self.qty, "usd": self.qty * price,
-                 "fee": 0.0, "reason": "geliquideerd", "strategy": strategy, "pnl": pnl}
-        self.balance = max(0.0, eq - self.qty * price * mm)
-        self.qty, self.entry = 0.0, 0.0
+        after = max(0.0, eq - abs(self.qty) * price * mm)
+        trade = {"t": t, "side": "LIQUIDATIE " + side, "price": price, "qty": abs(self.qty),
+                 "usd": abs(self.qty) * price, "fee": 0.0, "reason": "geliquideerd",
+                 "strategy": strategy, "pnl": after - self.balance - getattr(self, "_open_fee", 0.0)}
+        self.balance = after
+        self.qty, self.entry, self.opened_t = 0.0, 0.0, None
         self.liquidations += 1
+        self.losses += 1
         return self._log(trade)

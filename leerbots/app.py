@@ -96,9 +96,9 @@ class App:
             with self.lock:
                 feed(self.bots, data, trade_from=None)
             for sym, bot in self.bots.items():
-                m = bot.model.metrics()
-                log.info("%s opgewarmd: %d candles, model-score %.3f, strategie %s",
-                         sym, bot.index, m.get("skill", 0.0), bot.active)
+                up, down = bot.model_up.metrics(), bot.model_down.metrics()
+                log.info("%s opgewarmd: %d candles, modelscore stijging %.3f / daling %.3f, strategie %s",
+                         sym, bot.index, up.get("skill", 0.0), down.get("skill", 0.0), bot.active)
         self.save()
         self.phase = "live"
 
@@ -141,9 +141,9 @@ class App:
                 self.save()
                 for sym in SYMBOLS:
                     b = self.bots[sym]
-                    log.info("%s %.2f | equity $%.2f | strategie %s | p=%s", sym, b.last_price,
-                             b.portfolio.equity(b.last_price), b.active,
-                             f"{b.p:.2f}" if b.p is not None else "-")
+                    log.info("%s %.2f | equity $%.2f | %s | strategie %s | stijging/daling %s", sym,
+                             b.last_price, b.portfolio.equity(b.last_price), b.portfolio.side or "geen positie",
+                             b.active, f"{b.p[0]:.2f}/{b.p[1]:.2f}" if b.p else "-")
             self.updated = now
 
     def command(self, symbol, action):

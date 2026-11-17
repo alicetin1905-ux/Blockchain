@@ -2,7 +2,13 @@
 
 Drie zelflerende trading-bots voor **Bitcoin, Ethereum en Solana**. Ze handelen vanzelf op live Binance-koersen, maar alleen met **nep-geld (paper trading)**. Er worden geen orders naar een beurs gestuurd en je hebt geen API-sleutels nodig.
 
-Standaard krijgt elke bot **$500**, handelt hij met maximaal **5x hefboom** zoals op een Binance USDT-futures account, en riskeert hij **maximaal 10% van zijn geld per trade**. De simulatie rekent futures-fees, funding en liquidatie mee.
+Standaard werkt elke bot zo:
+- hij krijgt **$500**;
+- hij kan **long en short**, zoals op een Binance USDT-futures account;
+- hij heeft **hoogstens één positie tegelijk**;
+- hij riskeert **maximaal 2% van zijn geld per trade**, met een hefboom van hoogstens 5x.
+
+De simulatie rekent futures-fees, funding en liquidatie mee.
 
 Alles is gewone Python (3.9 of nieuwer), zonder extra pakketten.
 
@@ -15,9 +21,16 @@ python3 run.py
 Open daarna **http://localhost:8000** voor het dashboard.
 
 - Bij de eerste start leren de bots eerst op de laatste 3000 uurcandles (ongeveer 4 maanden). Ze traden dan nog niet. Dat opwarmen duurt ongeveer een halve minuut.
-- Daarna draaien ze live. Elk uur komt er een nieuwe candle binnen, en elke 10 seconden wordt de koers gecontroleerd voor de stop-loss.
-- Het geheugen (model, strategiescores, portemonnee) staat in `state/`. Stop je het programma met Ctrl+C en start je het later opnieuw, dan gaan de bots verder waar ze waren. Gemiste candles gebruiken ze alleen om te leren; daarover traden ze niet achteraf.
-- Opties: `--capital 500` (startgeld per bot), `--leverage 5` (hefboom, `1` = zonder), `--risk 10` (max verlies per trade in %), `--reset` (alles vergeten), `--interval 15m` (andere candle-grootte), `--port 8080`, `--host 0.0.0.0` (dashboard ook vanaf andere apparaten bereikbaar).
+- Daarna draaien ze live. Elk uur komt er een nieuwe candle binnen, en elke 10 seconden wordt de koers gecontroleerd voor de stop-loss en liquidatie.
+- Het geheugen (modellen, strategiescores, portemonnee) staat in `state/`. Stop je het programma met Ctrl+C en start je het later opnieuw, dan gaan de bots verder waar ze waren. Gemiste candles gebruiken ze alleen om te leren; daarover traden ze niet achteraf.
+- Opties:
+  - `--capital 500`: startgeld per bot;
+  - `--leverage 5`: maximale hefboom;
+  - `--risk 2`: max verlies per trade in %;
+  - `--reset`: alles vergeten;
+  - `--interval 15m`: andere candle-grootte;
+  - `--port 8080`;
+  - `--host 0.0.0.0`: dashboard ook vanaf andere apparaten bereikbaar.
 - Verander je startgeld, hefboom, risico of interval, dan beginnen de bots automatisch opnieuw.
 
 Voor 24/7 laat je het draaien op een pc die aan blijft, een Raspberry Pi of een kleine VPS, bijvoorbeeld met `nohup python3 run.py &`, `tmux` of een systemd-service.
@@ -25,80 +38,109 @@ Voor 24/7 laat je het draaien op een pc die aan blijft, een Raspberry Pi of een 
 ## Backtest
 
 ```bash
-python3 backtest.py                       # 180 dagen traden na 60 dagen opwarmen, uurcandles
-python3 backtest.py --interval 15m --days 60 --warmup-days 20
-python3 backtest.py --leverage 2          # andere hefboom testen
+python3 backtest.py                   # 180 dagen traden na 60 dagen opwarmen, uurcandles
+python3 backtest.py --periods 4       # 4 aparte periodes van 180 dagen: is het resultaat stabiel?
+python3 backtest.py --risk 5 --leverage 3
 ```
 
-De bots leren tijdens de test gewoon door en zien nooit de toekomst: elke beslissing gebruikt alleen data van vóór dat moment.
+De bots leren tijdens de test gewoon door en zien nooit de toekomst: elke beslissing gebruikt alleen data van vóór dat moment. Test een wijziging altijd met `--periods 4`. Eén goede periode zegt weinig.
 
 ## Hoe de zelflerende modus werkt
 
-Elke munt heeft een eigen bot met een eigen nep-portemonnee van $500. Per afgesloten candle doet de bot dit:
+Elke munt heeft een eigen bot met een eigen nep-portemonnee. Per afgesloten candle doet de bot dit:
 
 ```
-candle ──► signalen ──► model leert bij ──► strategieën ──► strategiekiezer ──► risicoregels ──► paper trade
-              │              ▲                   │                ▲
-              │              └─ uitkomst 6 candles later          └─ virtuele winst/verlies per strategie
+candle ──► signalen ──► 2 modellen leren bij ──► strategieën ──► strategiekiezer ──► risicoregels ──► paper trade
+              │            ▲                          │                ▲
+              │            └─ uitkomst 6 candles later └─ virtuele winst/verlies per strategie, long én short
               └─ ETH en SOL kijken ook naar BTC
 ```
 
-**1. Signalen** (`leerbots/features.py`): koersverandering over 1, 3, 12 en 48 candles, beweeglijkheid, RSI, afstand tot de EMA20 en EMA50, volume ten opzichte van normaal, candlevorm en tijdstip. ETH en SOL krijgen ook BTC's koersverandering mee.
+**1. Signalen** (`leerbots/features.py`):
+- koersverandering over 1, 3, 12 en 48 candles;
+- beweeglijkheid en RSI;
+- afstand tot de EMA20 en EMA50;
+- volume ten opzichte van normaal;
+- candlevorm en tijdstip.
 
-**2. Voorspellend model** (`leerbots/model.py`): online logistische regressie. Het schat de kans dat de koers binnen 6 candles meer stijgt dan de kosten van een koop en verkoop samen. Zodra die 6 candles voorbij zijn, weet het model of het gelijk had en past het zijn gewichten een klein stapje aan. Het leert dus continu, niet één keer vooraf.
+ETH en SOL krijgen ook BTC's koersverandering mee.
 
-**3. Strategieën** (`leerbots/strategies.py`): trend volgen, terugveren (RSI), uitbraak, het model volgen, of cash. Alleen long: kopen of niet, zonder shorten en zonder hefboom.
+**2. Twee voorspellende modellen** (`leerbots/model.py`), allebei online logistische regressie:
+- het ene schat de kans dat de koers binnen 6 candles meer **stijgt** dan de kosten van in- en uitstappen;
+- het andere schat de kans dat de koers meer **daalt** dan die kosten.
 
-**4. Strategiekiezer** (`leerbots/bandit.py`), de eigenlijke zelfleer-laag. Elke candle krijgt elke strategie een virtuele score: wat ze ná kosten verdiend zou hebben, ook als de bot haar niet volgt. Oude resultaten vervagen (discount 0,995, ongeveer 8 dagen geheugen), zodat de bot zich aanpast als de markt omslaat. Elke 6 candles kiest de bot de strategie met de hoogste *ondergrens* (gemiddelde min de onzekerheid). Is geen strategie aantoonbaar beter dan niets doen, dan blijft hij in cash. Hij wisselt ook alleen als de verwachte winst de kosten van de wissel dekt.
+Zodra die 6 candles voorbij zijn, weten de modellen of ze gelijk hadden en passen ze zich een klein stapje aan.
 
-**5. Positiegrootte, hefboom en risico per trade**: de strategie bepaalt óf de bot in de munt zit; het risico per trade bepaalt hoe groot. De bot kiest de grootste positie waarbij een geraakte stop-loss, inclusief fees en slippage, hoogstens 10% van zijn geld kost:
+**3. Strategieën** (`leerbots/strategies.py`). Elke strategie zegt long, short of niets:
+
+| Strategie | Long | Short |
+|---|---|---|
+| Trend volgen | EMA20 boven EMA50 en koers erboven | EMA20 onder EMA50 en koers eronder |
+| Terugveren | RSI onder 30, uit boven 55 | RSI boven 70, uit onder 45 |
+| Uitbraak | boven hoogste koers van 48 candles | onder laagste koers van 48 candles |
+| Model (ML) | stijgingsmodel duidelijk boven normaal | dalingsmodel duidelijk boven normaal |
+| Cash | nooit | nooit |
+
+**4. Strategiekiezer** (`leerbots/bandit.py`), de eigenlijke zelfleer-laag:
+- Elke candle krijgt elke strategie een virtuele score: wat ze ná kosten verdiend zou hebben, long of short, ook als de bot haar niet volgt.
+- Oude resultaten vervagen (discount 0,995, ongeveer 8 dagen geheugen), zodat de bot zich aanpast als de markt omslaat.
+- Elke 6 candles kiest de bot de strategie met de hoogste *ondergrens*: het gemiddelde min de onzekerheid. Is geen strategie aantoonbaar beter dan niets doen, dan blijft hij in cash.
+- Hij wisselt alleen als de verwachte winst de kosten van de wissel dekt.
+
+**5. Eén positie per munt.** Een positie wordt in één keer geopend en in één keer gesloten. De bot koopt niet bij en bouwt niet half af. Draait de strategie van long naar short, dan sluit hij eerst de long en opent daarna de short.
+
+**6. Positiegrootte en risico per trade.** De bot kiest de grootste positie waarbij een geraakte stop-loss, inclusief fees en slippage, hoogstens het ingestelde risico kost:
 
 ```
-positie = 10% / (2% stop-loss + 0,14% kosten)  = 4,67x je geld   (nooit meer dan de hefboom van 5x)
+positie = risico / (2% stop-loss + 0,14% kosten), nooit meer dan de hefboom
+  2% risico   -> 0,93x je geld  ($467 bij $500)
+  5% risico   -> 2,34x
+ 10% risico   -> 4,67x
 ```
 
-Met $500 is dat een positie van ongeveer $2.335. Raakt de stop-loss, dan kost dat ongeveer $50. Elke 1% koersbeweging is ongeveer 4,7% van je geld. Alleen long, geen shorten.
-
-**6. Risicoregels** (`leerbots/risk.py`): deze staan buiten het lerende deel, dus de bot kan ze niet "wegleren".
-- max 10% verlies per trade via de positiegrootte hierboven;
-- stop-loss bij 2% koersdaling onder de instapprijs, daarna 6 candles afkoelen;
-- liquidatie wordt gesimuleerd: bij 5x ongeveer 19,6% koersdaling, en dan is de inleg weg. De stop-loss moet dat voorkomen, maar bij een plotselinge koerssprong (gat) kan het toch gebeuren;
+**7. Risicoregels** (`leerbots/risk.py`). Deze staan buiten het lerende deel, dus de bot kan ze niet "wegleren".
+- stop-loss bij 2% koersbeweging tegen de positie in (onder de instap bij long, erboven bij short), daarna 6 candles afkoelen;
+- liquidatie wordt gesimuleerd. Bij 5x is dat ongeveer 19,6% tegen je in, en dan is de inleg weg. De stop-loss moet dat voorkomen, maar bij een plotselinge koerssprong (gat) kan het toch gebeuren;
 - bij 15% verlies op een dag geen positie meer voor de rest van die dag;
 - bij 40% onder de piek stopt de bot tot je hem op het dashboard hervat;
-- nooit meer dan de ingestelde hefboom;
 - knop "Stop en sluiten" per bot.
 
-**Kosten**: 0,05% futures-fee plus 0,02% slippage per trade, en funding van gemiddeld 0,01% per 8 uur over de positiegrootte zolang die open staat. Ook de virtuele scores rekenen dit mee. In werkelijkheid schommelt funding, en kan die bij veel vraag naar longs flink hoger zijn.
+**Kosten**:
+- 0,05% futures-fee plus 0,02% slippage per trade;
+- funding van gemiddeld 0,01% per 8 uur over de positiegrootte. Voorzichtig gerekend betalen long én short dit; in werkelijkheid ontvangen shorts vaak funding.
 
-Alle instellingen staan in `leerbots/config.py`.
+Ook de virtuele scores rekenen deze kosten mee. Alle instellingen staan in `leerbots/config.py`.
 
 ## Op het dashboard
 
 - **Waarde en resultaat** per bot, vergeleken met gewoon kopen en houden.
 - **Grafiek** van de bot tegenover de koers.
-- **Wat de bot leert**: welke strategie hij volgt, de kans dat elke strategie nu echt de beste is, de gemiddelde virtuele winst per candle in basispunten, en het totaal.
-- **Modelscore**: is het model beter dan gokken? Het dashboard vergelijkt het met "altijd hetzelfde antwoord". Een score boven 0 betekent beter dan gokken.
+- **Positie**: long of short, grootte, instapprijs, open resultaat, stop-loss, liquidatieprijs, wat een stop-loss nu zou kosten, en gewonnen tegen verloren trades.
+- **Wat de bot leert**:
+  - welke strategie hij volgt;
+  - de kans dat elke strategie nu echt de beste is;
+  - wat elke strategie nu zou doen (▲ long, ▼ short);
+  - de virtuele winst per strategie.
+- **Modellen**: kans op stijging en op daling nu, vergeleken met normaal. De score toont of een model beter is dan gokken (boven 0 = beter).
 - **Laatste trades** met de reden: welke strategie, of een stop-loss of risicoregel.
 
 ## Eerlijk over wat je kunt verwachten
 
-- Crypto-koersen zijn grotendeels onvoorspelbaar. In de tests scoort het model meestal rond 0, dus nauwelijks beter dan gokken. De strategiekiezer merkt dat en negeert het model dan.
-- In de backtests (180 dagen uurcandles, dalende markt) verloren de bots veel minder dan kopen en houden, vooral doordat ze vaak in cash bleven. In een stijgende markt blijven ze daardoor waarschijnlijk achter bij kopen en houden.
-- Hefboom vergroot winst én verlies. Dezelfde backtest met $500 per bot:
+De bots hebben in de tests **geen betrouwbaar voordeel** laten zien. Zo ziet `python3 backtest.py --periods 4` eruit, met vier aparte periodes van 180 dagen (november 2024 tot november 2026), $500 per bot:
 
-  | Hefboom | Totaal 3 bots | BTC | ETH | SOL | Grootste daling |
-  |---|---|---|---|---|---|
-  | 1x | +6,5% | +10,4% | +1,0% | +8,1% | 11 tot 15% |
-  | 2x | +10,3% | +19,0% | +0,1% | +11,9% | 21 tot 29% |
-  | 3x | -4,3% | +27,7% | -2,8% | -37,7% | 29 tot 40% |
-  | 5x | +5,7% | +42,6% | +10,8% | -36,3% | alle drie ~40%: noodstop geraakt |
+| Instelling | Gemiddeld per periode | Noodstop geraakt |
+|---|---|---|
+| Alleen long, 10% risico | -16% | 12 van 12 keer |
+| Alleen long, 2% risico | -5% | 0 van 12 keer |
+| Long en short, 10% risico | -21% | 12 van 12 keer |
+| Long en short, 5% risico | -13% | 9 van 12 keer |
+| **Long en short, 2% risico (standaard)** | **-12%** | 2 van 12 keer |
 
-  Bij 5x raakten alle drie de bots de noodstop (40% onder de piek). Het totaal hing dus vooral af van geluk in de volgorde van winst en verlies. Eén periode zegt bovendien weinig.
-
-  Met 10% risico per trade (positie 4,67x, de standaard) was het resultaat +0,7% totaal (BTC +31%, ETH +7,5%, SOL -36%). Geen enkele positie kostte meer dan 9,9%, maar drie of vier verliezende trades achter elkaar is al 30 tot 40%, en alle drie de bots raakten opnieuw de noodstop. Met `--risk 2` tot `--risk 5` is de kans daarop veel kleiner.
-- Het risico per trade is een maximum zolang de koers niet springt. Opent een candle ver onder de stop-loss (een gat), dan verkoopt de bot pas tegen die lagere koers en kan het verlies groter zijn.
-- Korte candles (5 minuten) kostten in tests veel meer aan fees dan ze opleverden. Daarom is 1 uur de standaard.
-- Laat de bots eerst weken op paper draaien voordat je aan echt geld denkt. Echte handel zit er bewust niet in. Als die ooit wordt toegevoegd: gebruik API-sleutels zonder opnamerechten en alleen geld dat je kunt missen.
+- **Shorten hielp in deze test niet.** De strategieën verloren op shorts ongeveer even vaak als op longs, en meer trades betekent meer kosten.
+- **Hoger risico per trade is vooral gokken.** Met 10% raakt elke bot vroeg of laat de noodstop.
+- **De modellen scoren rond 0**, dus niet beter dan gokken. De strategiekiezer merkt dat en volgt ze dan weinig.
+- **De 5x hefboom wordt bij 2% risico niet gebruikt.** De positie blijft dan onder 1x. De hefboom is alleen een plafond.
+- Laat de bots eerst lang op paper draaien voordat je aan echt geld denkt. Echte handel zit er bewust niet in. Als die ooit wordt toegevoegd: gebruik API-sleutels zonder opnamerechten en alleen geld dat je kunt missen.
 
 ## Tests
 

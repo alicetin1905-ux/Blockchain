@@ -29,7 +29,7 @@ class FeatureEngine:
         self.use_ref = use_ref
         self.closes = deque(maxlen=60)
         self.highs = deque(maxlen=48)   # vorige 48 candles (zonder de huidige)
-        self.lows = deque(maxlen=12)    # vorige 12 candles
+        self.lows = deque(maxlen=48)    # vorige 48 candles
         self.vols = deque(maxlen=48)
         self.rets = deque(maxlen=48)
         self.ema20 = None
@@ -60,7 +60,9 @@ class FeatureEngine:
         prev = self.closes[-1] if self.closes else None
 
         high48 = max(self.highs) if len(self.highs) == 48 else None
-        low12 = min(self.lows) if len(self.lows) == 12 else None
+        low48 = min(self.lows) if len(self.lows) == 48 else None
+        high12 = max(list(self.highs)[-12:]) if len(self.highs) >= 12 else None
+        low12 = min(list(self.lows)[-12:]) if len(self.lows) >= 12 else None
         vol_mean = sum(self.vols) / len(self.vols) if self.vols else 0.0
         vol_sd = _std(self.vols)
 
@@ -82,7 +84,7 @@ class FeatureEngine:
         self.vols.append(v)
         self.count += 1
 
-        if self.count < WARMUP or self.avg_gain is None or high48 is None or low12 is None:
+        if self.count < WARMUP or self.avg_gain is None or high48 is None or low48 is None:
             return None
 
         rsi = 100.0 if self.avg_loss == 0 else 100 - 100 / (1 + self.avg_gain / self.avg_loss)
@@ -99,5 +101,5 @@ class FeatureEngine:
         if self.use_ref:
             x += [ref["r3"], ref["r12"]] if ref else [0.0, 0.0]
         ind = {"close": c, "rsi": rsi, "ema20": self.ema20, "ema50": self.ema50,
-               "high48": high48, "low12": low12}
+               "high48": high48, "low48": low48, "high12": high12, "low12": low12}
         return {"t": k["t"], "x": x, "ind": ind, "r3": r3, "r12": r12}

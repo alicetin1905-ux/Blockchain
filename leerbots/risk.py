@@ -37,8 +37,9 @@ class RiskManager:
             return 0.0, "afkoelen na stop-loss"
         return target, ""
 
-    def stop_price(self, entry):
-        return entry * (1 - self.s.stop_loss) if entry > 0 else None
+    def stop_price(self, entry, direction=1):
+        """Stop-loss: onder de instap voor long, boven de instap voor short."""
+        return entry * (1 - direction * self.s.stop_loss) if entry > 0 else None
 
     def trigger_stop(self, index):
         self.cooldown_until = index + self.s.stop_cooldown
