@@ -32,10 +32,12 @@ def _row(k):
             "c": float(k[4]), "v": float(k[5]), "ct": int(k[6])}
 
 
-def klines(symbol, interval, limit=500, end_time=None):
+def klines(symbol, interval, limit=500, end_time=None, start_time=None):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     if end_time is not None:
         params["endTime"] = end_time
+    if start_time is not None:
+        params["startTime"] = start_time
     return [_row(k) for k in _get("/api/v3/klines", params)]
 
 
@@ -65,6 +67,20 @@ def history(symbol, interval, n):
             uniq.append(k)
     uniq.sort(key=lambda k: k["t"])
     return uniq[-n:]
+
+
+def history_range(symbol, interval, start_ms, end_ms):
+    """Alle afgesloten candles tussen start_ms en end_ms (ms), vooruit opgehaald."""
+    out, cursor = [], start_ms
+    now = int(time.time() * 1000)
+    while cursor < end_ms:
+        batch = klines(symbol, interval, 1000, start_time=cursor)
+        batch = [k for k in batch if k["t"] < end_ms and k["ct"] < now]
+        if not batch:
+            break
+        out += batch
+        cursor = batch[-1]["t"] + 1
+    return out
 
 
 def prices(symbols):

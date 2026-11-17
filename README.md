@@ -27,6 +27,7 @@ Open daarna **http://localhost:8000** voor het dashboard.
   - `--capital 500`: startgeld per bot;
   - `--leverage 5`: maximale hefboom;
   - `--risk 2`: max verlies per trade in %;
+  - `--no-short`: alleen long;
   - `--reset`: alles vergeten;
   - `--interval 15m`: andere candle-grootte;
   - `--port 8080`;
@@ -41,6 +42,8 @@ Voor 24/7 laat je het draaien op een pc die aan blijft, een Raspberry Pi of een 
 python3 backtest.py                   # 180 dagen traden na 60 dagen opwarmen, uurcandles
 python3 backtest.py --periods 4       # 4 aparte periodes van 180 dagen: is het resultaat stabiel?
 python3 backtest.py --risk 5 --leverage 3
+python3 backtest.py --from 2020 --to 2026 # elk kalenderjaar apart, met verse bots
+python3 backtest.py --no-short            # alleen long
 ```
 
 De bots leren tijdens de test gewoon door en zien nooit de toekomst: elke beslissing gebruikt alleen data van vóór dat moment. Test een wijziging altijd met `--periods 4`. Eén goede periode zegt weinig.
@@ -135,6 +138,18 @@ De bots hebben in de tests **geen betrouwbaar voordeel** laten zien. Zo ziet `py
 | Long en short, 10% risico | -21% | 12 van 12 keer |
 | Long en short, 5% risico | -13% | 9 van 12 keer |
 | **Long en short, 2% risico (standaard)** | **-12%** | 2 van 12 keer |
+
+Over 2020 tot 2026, elk jaar apart met verse bots van $500 (`--from 2020 --to 2026`):
+
+| Instelling | Gemiddeld per jaar | Noodstop geraakt |
+|---|---|---|
+| Long en short, 2% risico (standaard) | -21% | 13 van 21 keer |
+| Alleen long, 2% risico | -9% | 6 van 21 keer |
+| Long en short, 10% risico | +13% | 21 van 21 keer |
+
+Die +13% bij 10% risico komt vrijwel helemaal uit één uitschieter: SOL in 2023 (+625%). Alle andere bots raakten de noodstop. Dat is geluk, geen strategie.
+
+**Bekend probleem:** de vaste stop-loss van 2% is te krap voor crypto. Van de trades die op een stop-loss eindigden, ging het overgrote deel verloren aan gewone schommelingen, terwijl de trades die de strategie zelf sloot gemiddeld winst maakten. Daarbij beoordeelt de strategiekiezer de strategieën nu zónder stop-loss, terwijl de echte trades er wel een hebben.
 
 - **Shorten hielp in deze test niet.** De strategieën verloren op shorts ongeveer even vaak als op longs, en meer trades betekent meer kosten.
 - **Hoger risico per trade is vooral gokken.** Met 10% raakt elke bot vroeg of laat de noodstop.

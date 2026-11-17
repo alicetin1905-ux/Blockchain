@@ -100,6 +100,8 @@ class TradingBot:
 
         for a in KEYS:
             new = STRATEGIES[a][1](feats["ind"], self.virt[a], self.p, base)
+            if not self.s.allow_short:
+                new = max(new, 0)
             self.virt_cost[a] = self.s.cost * abs(new - self.virt[a])
             self.virt[a] = new
 
@@ -254,6 +256,7 @@ class TradingBot:
             "losses": pf.losses,
             "entry": pf.entry,
             "leverage": self.s.leverage,
+            "allow_short": self.s.allow_short,
             "max_exposure": self.s.max_exposure,
             "risk_per_trade": self.s.risk_per_trade,
             "loss_at_stop": self._loss_at_stop(),

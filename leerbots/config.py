@@ -15,6 +15,7 @@ class Settings:
     # Portefeuille (elke bot heeft een eigen nep-portemonnee, zoals een futures-account)
     start_capital: float = 500.0
     leverage: float = 5.0           # maximale hefboom (positie / eigen geld)
+    allow_short: bool = True        # False = alleen long
     fee_rate: float = 0.0005        # Binance USDT-futures taker-fee 0,05% (spot: 0,001)
     slippage: float = 0.0002        # 0,02% aangenomen slippage per trade
     funding_8h: float = 0.0001      # gemiddelde funding 0,01% per 8 uur die longs betalen (spot: 0)

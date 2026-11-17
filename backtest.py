@@ -7,6 +7,8 @@ beslissing gebruikt alleen candles van vóór dat moment (walk-forward).
     python3 backtest.py                    # 180 dagen traden na 60 dagen opwarmen (1h-candles)
     python3 backtest.py --periods 4        # 4 aparte periodes van 180 dagen: is het resultaat stabiel?
     python3 backtest.py --risk 5 --leverage 3
+    python3 backtest.py --from 2020 --to 2026   # elk kalenderjaar apart, met verse bots
+    python3 backtest.py --no-short              # alleen long
     python3 backtest.py --offline          # gebruik eerder opgehaalde data in data/
 """
 import argparse
@@ -50,7 +52,8 @@ def run(candles, days, settings):
 
 def header(s):
     print("=" * 84)
-    print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, long en short, 1 positie per munt,")
+    sides = "long en short" if s.allow_short else "alleen long"
+    print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, {sides}, 1 positie per munt,")
     print(f"max {s.leverage:g}x hefboom, max {s.risk_per_trade:.0%} risico per trade (positie {s.max_exposure:.2f}x)")
     print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, funding {s.funding_8h:.2%}/8u meegerekend)")
     print("=" * 84)
@@ -113,6 +116,61 @@ def run_periods(candles, periods, days, warmup_days, settings):
     print("hh = kopen en houden (1x).  ! = noodstop geraakt (te ver onder de piek)")
 
 
+def load_years(interval, first, last, warmup_days, offline, cache_dir="data"):
+    """Candles van (1 januari `first` min opwarmtijd) tot eind `last` (of nu)."""
+    start = int(dt.datetime(first, 1, 1, tzinfo=dt.timezone.utc).timestamp() * 1000) - warmup_days * 86_400_000
+    end = int(dt.datetime(last + 1, 1, 1, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    os.makedirs(cache_dir, exist_ok=True)
+    out = {}
+    for sym in SYMBOLS:
+        path = os.path.join(cache_dir, f"{sym}_{interval}_{first}-{last}.json")
+        if offline or os.path.exists(path):
+            with open(path) as f:
+                out[sym] = json.load(f)
+        else:
+            print(f"Ophalen {sym} {first}-{last}...")
+            out[sym] = binance.history_range(sym, interval, start, end)
+            with open(path, "w") as f:
+                json.dump(out[sym], f)
+    return out
+
+
+def run_years(candles, first, last, warmup_days, settings):
+    """Elk kalenderjaar apart: verse bots die eerst `warmup_days` voor 1 januari leren."""
+    header(settings)
+    warm = warmup_days * 86_400_000
+    print(f"\n{'Jaar':10}" + "".join(f"{s.replace('USDT', ''):>21}" for s in SYMBOLS) + f"{'Totaal':>10}")
+    totals, stops, n = [], 0, 0
+    for year in range(first, last + 1):
+        y0 = int(dt.datetime(year, 1, 1, tzinfo=dt.timezone.utc).timestamp() * 1000)
+        y1 = int(dt.datetime(year + 1, 1, 1, tzinfo=dt.timezone.utc).timestamp() * 1000)
+        window = {s: [k for k in ks if y0 - warm <= k["t"] < y1] for s, ks in candles.items()}
+        window = {s: ks for s, ks in window.items() if ks}
+        if REFERENCE not in window:
+            continue
+        bots = {sym: TradingBot(sym, settings, use_ref=sym != REFERENCE) for sym in window}
+        feed(bots, window, y0)
+        cells, eq, start = [], 0.0, 0.0
+        for sym in SYMBOLS:
+            if sym not in bots or bots[sym].start_price is None:
+                cells.append("geen data")
+                continue
+            st = bots[sym].status()
+            eq += st["equity"]
+            start += st["start_capital"]
+            stops += st["risk"]["killed"]
+            n += 1
+            late = "*" if window[sym][0]["t"] > y0 - warm else ""
+            cells.append(f"{st['pnl_pct']:+6.1f}% (hh {st['buy_hold_pct']:+5.0f}%)" + ("!" if st["risk"]["killed"] else " ") + late)
+        total = (eq / start - 1) * 100
+        totals.append(total)
+        upto = "" if candles[REFERENCE][-1]["t"] >= y1 - 3_600_000 else " (t/m nu)"
+        print(f"{str(year) + upto:10}" + "".join(f"{c:>21}" for c in cells) + f"{total:+9.1f}%")
+    print(f"\nGemiddeld per jaar: {sum(totals) / len(totals):+.1f}%   Noodstop geraakt: {stops} van {n} keer")
+    print("hh = kopen en houden (1x).  ! = noodstop geraakt.  * = munt kwam later dat jaar op Binance")
+    return totals
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--interval", default="1h", choices=list(INTERVAL_MS))
@@ -122,10 +180,18 @@ def main():
     ap.add_argument("--days", type=int, default=180, help="dagen waarin getraded wordt (per periode)")
     ap.add_argument("--warmup-days", type=int, default=60, help="dagen vooraf om alleen te leren")
     ap.add_argument("--periods", type=int, default=1, help="aantal aparte periodes na elkaar")
+    ap.add_argument("--from", dest="first", type=int, help="eerste jaar (test elk jaar apart)")
+    ap.add_argument("--to", dest="last", type=int, help="laatste jaar")
+    ap.add_argument("--no-short", action="store_true", help="alleen long, niet shorten")
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     args = ap.parse_args()
     settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
-                        risk_per_trade=args.risk / 100)
+                        risk_per_trade=args.risk / 100, allow_short=not args.no_short)
+    if args.first:
+        last = args.last or dt.datetime.now(dt.timezone.utc).year
+        candles = load_years(args.interval, args.first, last, args.warmup_days, args.offline)
+        run_years(candles, args.first, last, args.warmup_days, settings)
+        return
     per_day = 86_400_000 // settings.interval_ms
     n = (args.warmup_days + args.periods * args.days) * per_day
     candles = load_candles(args.interval, n, args.offline)

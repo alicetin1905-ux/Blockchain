@@ -169,7 +169,7 @@ function card(b) {
   return `
   <div class="card">
     <div class="head">
-      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · long/short · ${(b.risk_per_trade * 100).toFixed(0)}% risico per trade</span>
+      <h2>${esc(b.name)}</h2><span class="sym">${esc(b.symbol)} · ${esc(b.interval)} · ${b.allow_short ? "long/short" : "alleen long"} · ${(b.risk_per_trade * 100).toFixed(0)}% risico per trade</span>
       <span class="pill ${b.risk.state}">${b.risk.state}</span>
       <span class="price">$${price(b.price)}</span>
     </div>
