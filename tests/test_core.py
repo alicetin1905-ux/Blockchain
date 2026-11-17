@@ -149,9 +149,14 @@ class RiskTest(unittest.TestCase):
 
 class RiskPerSymbolTest(unittest.TestCase):
     def test_parse_risk(self):
-        self.assertEqual(parse_risk(), {"BTCUSDT": 0.02, "ETHUSDT": 0.05, "SOLUSDT": 0.10})
+        self.assertEqual(parse_risk(), {"BTCUSDT": 0.05, "ETHUSDT": 0.05, "SOLUSDT": 0.05})
         self.assertEqual(parse_risk("5"), {"BTCUSDT": 0.05, "ETHUSDT": 0.05, "SOLUSDT": 0.05})
         self.assertEqual(parse_risk("sol=3, BTC=1"), {"BTCUSDT": 0.01, "ETHUSDT": 0.05, "SOLUSDT": 0.03})
+
+    def test_defaults_long_only_five_percent(self):
+        s = Settings()
+        self.assertFalse(s.allow_short)
+        self.assertEqual(s.risk_per_trade, 0.05)
         with self.assertRaises(ValueError):
             parse_risk("DOGE=5")
 
@@ -163,6 +168,14 @@ class RiskPerSymbolTest(unittest.TestCase):
 
 
 class BotTest(unittest.TestCase):
+    def test_long_only_never_shorts(self):
+        s = Settings(min_model_updates=50)
+        down = synthetic(1500, drift=-0.002, vol=0.006, seed=7)
+        bots = {"BTCUSDT": TradingBot("BTCUSDT", s)}
+        feed(bots, {"BTCUSDT": down}, trade_from=down[600]["t"])
+        self.assertFalse(any("SHORT" in t["side"] for t in bots["BTCUSDT"].portfolio.trades))
+        self.assertTrue(all(v >= 0 for v in bots["BTCUSDT"].virt.values()))
+
     def test_runs_end_to_end_without_lookahead(self):
         s = Settings(min_model_updates=50)
         candles = {"BTCUSDT": synthetic(1500, seed=1), "ETHUSDT": synthetic(1500, seed=2)}
@@ -222,7 +235,7 @@ class BotTest(unittest.TestCase):
         self.assertEqual(bot.portfolio.liquidations, 1)
 
     def test_one_position_and_profits_from_trends(self):
-        s = Settings(min_model_updates=50)
+        s = Settings(min_model_updates=50, allow_short=True)
         up = synthetic(1500, drift=0.002, vol=0.006, seed=7)
         down = synthetic(1500, drift=-0.002, vol=0.006, seed=7)
         for candles, side in ((up, "LONG"), (down, "SHORT")):

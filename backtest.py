@@ -7,9 +7,9 @@ beslissing gebruikt alleen candles van vóór dat moment (walk-forward).
     python3 backtest.py                    # 180 dagen traden na 60 dagen opwarmen (1h-candles)
     python3 backtest.py --periods 4        # 4 aparte periodes van 180 dagen: is het resultaat stabiel?
     python3 backtest.py --risk 5 --leverage 3     # 5% risico voor alle munten
-    python3 backtest.py --risk BTC=2,ETH=5,SOL=10  # risico per munt (dit is ook de standaard)
+    python3 backtest.py --risk BTC=2,ETH=5,SOL=10  # risico per munt (standaard 5% voor alle munten)
     python3 backtest.py --from 2020 --to 2026   # elk kalenderjaar apart, met verse bots
-    python3 backtest.py --no-short              # alleen long
+    python3 backtest.py --short                 # ook shorten (standaard alleen long)
     python3 backtest.py --offline          # gebruik eerder opgehaalde data in data/
 """
 import argparse
@@ -188,13 +188,14 @@ def main():
     ap.add_argument("--periods", type=int, default=1, help="aantal aparte periodes na elkaar")
     ap.add_argument("--from", dest="first", type=int, help="eerste jaar (test elk jaar apart)")
     ap.add_argument("--to", dest="last", type=int, help="laatste jaar")
-    ap.add_argument("--no-short", action="store_true", help="alleen long, niet shorten")
+    ap.add_argument("--short", action="store_true", help="ook shorten (standaard alleen long)")
+    ap.add_argument("--no-short", action="store_true", help=argparse.SUPPRESS)  # oude optie: is nu de standaard
     ap.add_argument("--stop-mult", type=float, default=Settings.stop_vol_mult,
                     help="stop-loss = zoveel keer de normale dagbeweging (standaard 2)")
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     args = ap.parse_args()
     settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
-                        allow_short=not args.no_short, stop_vol_mult=args.stop_mult)
+                        allow_short=args.short, stop_vol_mult=args.stop_mult)
     per = per_symbol(settings, parse_risk(args.risk))
     if args.first:
         last = args.last or dt.datetime.now(dt.timezone.utc).year

@@ -5,7 +5,7 @@ SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 REFERENCE = "BTCUSDT"  # ETH en SOL kijken ook naar wat BTC doet
 NAMES = {"BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana"}
 # Max verlies per trade (in % van het geld van die bot) als de stop-loss geraakt wordt.
-DEFAULT_RISK = {"BTCUSDT": 2.0, "ETHUSDT": 5.0, "SOLUSDT": 10.0}
+DEFAULT_RISK = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "SOLUSDT": 5.0}
 INTERVAL_MS = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}
 
 
@@ -17,7 +17,7 @@ class Settings:
     # Portefeuille (elke bot heeft een eigen nep-portemonnee, zoals een futures-account)
     start_capital: float = 500.0
     leverage: float = 5.0           # maximale hefboom (positie / eigen geld)
-    allow_short: bool = True        # False = alleen long
+    allow_short: bool = False       # True = ook shorten (kostte in backtests geld)
     fee_rate: float = 0.0005        # Binance USDT-futures taker-fee 0,05% (spot: 0,001)
     slippage: float = 0.0002        # 0,02% aangenomen slippage per trade
     funding_8h: float = 0.0001      # gemiddelde funding 0,01% per 8 uur die longs betalen (spot: 0)
@@ -34,7 +34,7 @@ class Settings:
 
     # Risico (de bot kan deze regels niet wegleren). Percentages van je eigen geld,
     # behalve de stop-loss: die gaat over de koers.
-    risk_per_trade: float = 0.02    # max 2% van je geld verliezen als de stop-loss geraakt wordt
+    risk_per_trade: float = 0.05    # max 5% van je geld verliezen als de stop-loss geraakt wordt
     stop_vol_mult: float = 2.0      # stop-loss = 2x de normale dagbeweging van de munt
     stop_min: float = 0.01          # ... maar minstens 1%
     stop_max: float = 0.15          # ... en hoogstens 15% van de instapprijs

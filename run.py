@@ -23,8 +23,9 @@ def main():
     ap.add_argument("--leverage", type=float, default=5, help="maximale hefboom (standaard 5)")
     ap.add_argument("--risk", default=None,
                     help="max verlies per trade in %% van het geld van de bot: '5' voor alle munten of "
-                         "'BTC=2,ETH=5,SOL=10' per munt (standaard BTC 2, ETH 5, SOL 10)")
-    ap.add_argument("--no-short", action="store_true", help="alleen long, niet shorten")
+                         "'BTC=2,ETH=5,SOL=10' per munt (standaard 5 voor alle munten)")
+    ap.add_argument("--short", action="store_true", help="ook shorten (standaard alleen long)")
+    ap.add_argument("--no-short", action="store_true", help=argparse.SUPPRESS)  # oude optie: is nu de standaard
     ap.add_argument("--warmup", type=int, default=3000, help="candles geschiedenis om op te leren bij de start")
     ap.add_argument("--poll", type=float, default=10, help="seconden tussen koerscontroles")
     ap.add_argument("--state", default="state", help="map waar de bots hun geheugen opslaan")
@@ -35,7 +36,7 @@ def main():
     log = logging.getLogger("leerbots")
 
     base = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
-                    allow_short=not args.no_short)
+                    allow_short=args.short)
     per = per_symbol(base, parse_risk(args.risk))
     app = App(per, args.state, args.warmup)
     server = make_server(app, args.host, args.port)

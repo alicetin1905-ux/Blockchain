@@ -4,9 +4,9 @@ Drie zelflerende trading-bots voor **Bitcoin, Ethereum en Solana**. Ze handelen 
 
 Standaard werkt elke bot zo:
 - hij krijgt **$500**;
-- hij kan **long en short**, zoals op een Binance USDT-futures account;
+- hij handelt **alleen long**, zoals op een Binance USDT-futures account (shorten kan met `--short`, maar kostte in de tests geld);
 - hij heeft **hoogstens één positie tegelijk**;
-- hij riskeert per trade maximaal **2% (BTC), 5% (ETH) of 10% (SOL)** van zijn geld, met een hefboom van hoogstens 5x.
+- hij riskeert per trade maximaal **5% van zijn geld**, met een hefboom van hoogstens 5x.
 
 De simulatie rekent futures-fees, funding en liquidatie mee.
 
@@ -26,8 +26,8 @@ Open daarna **http://localhost:8000** voor het dashboard.
 - Opties:
   - `--capital 500`: startgeld per bot;
   - `--leverage 5`: maximale hefboom;
-  - `--risk BTC=2,ETH=5,SOL=10`: max verlies per trade in % per munt, of `--risk 5` voor alle munten;
-  - `--no-short`: alleen long;
+  - `--risk 5`: max verlies per trade in % voor alle munten, of per munt zoals `--risk BTC=2,ETH=5,SOL=10`;
+  - `--short`: ook shorten;
   - `--reset`: alles vergeten;
   - `--interval 15m`: andere candle-grootte;
   - `--port 8080`;
@@ -44,7 +44,7 @@ python3 backtest.py --periods 4       # 4 aparte periodes van 180 dagen: is het 
 python3 backtest.py --risk 5 --leverage 3   # 5% risico voor alle munten
 python3 backtest.py --risk BTC=2,ETH=5,SOL=10
 python3 backtest.py --from 2020 --to 2026 # elk kalenderjaar apart, met verse bots
-python3 backtest.py --no-short            # alleen long
+python3 backtest.py --short               # ook shorten
 python3 backtest.py --stop-mult 3         # ruimere stop-loss (3x de dagbeweging)
 ```
 
@@ -138,7 +138,7 @@ Ook de virtuele scores rekenen deze kosten mee. Alle instellingen staan in `leer
 
 Getest over 2020 tot 2026, elk kalenderjaar apart met verse bots van $500 (`python3 backtest.py --from 2020 --to 2026`):
 
-| Jaar | Alleen long, 2% | Alleen long, 5% | Long + short, 2% (standaard) | Long + short, 5% |
+| Jaar | Alleen long, 2% | **Alleen long, 5% (standaard)** | Long + short, 2% | Long + short, 5% |
 |---|---|---|---|---|
 | 2020 | +22% | +42% | -1% | -10% |
 | 2021 | +24% | +65% | -11% | -7% |
@@ -150,7 +150,7 @@ Getest over 2020 tot 2026, elk kalenderjaar apart met verse bots van $500 (`pyth
 | **Gemiddeld** | **+7%** | **+18%** | **-7%** | **-14%** |
 | Noodstop geraakt | 0 van 21 | 0 van 21 | 0 van 21 | 9 van 21 |
 
-Met risico per munt (BTC 2%, ETH 5%, SOL 10%, de standaard) en 10% voor alle munten:
+Met risico per munt (BTC 2%, ETH 5%, SOL 10%) en 10% voor alle munten:
 
 | Jaar | Alleen long, BTC 2 / ETH 5 / SOL 10 | Alleen long, alles 10% | Long + short, BTC 2 / ETH 5 / SOL 10 |
 |---|---|---|---|
@@ -168,7 +168,7 @@ Het gemiddelde van +24% komt bijna helemaal uit één jaar: SOL in 2021 (+451%, 
 
 Wat dit betekent:
 
-- **Shorten kost geld.** In elk van de 7 jaren deed long + short het slechter dan alleen long. De bots zitten met shorts vaak fout. Gebruik `--no-short`.
+- **Shorten kost geld.** In elk van de 7 jaren deed long + short het slechter dan alleen long. De bots zitten met shorts vaak fout. Daarom staat shorten standaard uit.
 - **Alleen long verdient vooral in stijgende jaren** (2020, 2021, 2023), maar veel minder dan kopen en houden. Zo deed BTC kopen en houden in 2020 +303% en de bot +31%. In dalende jaren verliest de bot wel veel minder: in 2022 -7% tegenover -65% tot -94% voor kopen en houden.
 - **De laatste twee jaar (2025-2026) zijn negatief**, ook met alleen long. Een groot deel van de winst komt uit de sterke stijgingsjaren 2020-2023. Of dat zich herhaalt, weet niemand.
 - **Het resultaat hangt niet af van de precieze stop-loss.** Met 1,5x, 2x of 3x de dagbeweging is alleen long steeds positief (+5% tot +21% per jaar) en long + short steeds negatief (-4% tot -13%). Test zelf met `--stop-mult`.
