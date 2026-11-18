@@ -191,6 +191,37 @@ Wat verder blijft gelden:
 
 Laat de bots eerst lang op paper draaien voordat je aan echt geld denkt. Echte handel zit er bewust niet in. Als die ooit wordt toegevoegd: gebruik API-sleutels zonder opnamerechten en alleen geld dat je kunt missen.
 
+## Ter vergelijking: een eenvoudige dagtrend-regel
+
+```bash
+python3 simple_trend.py                    # 2020 tot nu, 50-daags gemiddelde
+python3 simple_trend.py --sma 20,50,100,200
+```
+
+De regel is vooraf vastgelegd en daarna niet bijgesteld:
+- staat de dagslotkoers boven het 50-daags gemiddelde, dan long met 1x het eigen geld;
+- anders geen positie;
+- één beslissing per dag, op het slot;
+- geen model, geen strategiekiezer, geen stop-loss;
+- dezelfde fees en slippage als de bots, plus de echte funding rates.
+
+Gemiddeld per munt per jaar:
+
+| | Ontwikkeljaren 2020-2023 | | Apart gehouden 2024-2026 | |
+|---|---|---|---|---|
+| | rendement | gem. grootste daling | rendement | gem. grootste daling |
+| Zelflerende bot (5% risico) | +40% | 19% | **-7%** | 23% |
+| Dagtrend 20 dagen | +342% | 44% | +9% | 33% |
+| **Dagtrend 50 dagen** | +415% | 38% | **+20%** | 31% |
+| Dagtrend 100 dagen | +232% | 47% | +6% | 33% |
+| Dagtrend 200 dagen | +138% | 37% | +4% | 34% |
+
+- **Bij elke lengte van het gemiddelde presteert de eenvoudige regel beter dan de zelflerende bot**, ook in de apart gehouden jaren. Die conclusie hangt dus niet af van één gekozen getal.
+- **Welke lengte het beste is, is niet stabiel.** 50 dagen scoort het hoogst, maar 20, 100 en 200 dagen veel lager. Ga er niet van uit dat 50 dagen in de toekomst ook de beste is.
+- **De regel heeft grotere dalingen**, omdat hij met het volle bedrag in de munt zit en geen stop-loss heeft. In 2022 verloor hij met 50 dagen gemiddeld 37%, tegenover -75% met kopen en houden. De bot verloor dat jaar maar 2%. Over de hele periode was de grootste daling 55% tot 69%, tegenover 77% tot 96% met kopen en houden.
+- **De gemiddelden van 2020 tot 2023 worden sterk opgeblazen door SOL in 2021** (+3307%). Kijk vooral naar de apart gehouden jaren.
+- Over de hele periode doorlopend (50 dagen): BTC +1186% (kopen en houden +803%), ETH +1630% (+1313%), SOL +8533% (+2448%).
+
 ## Tests
 
 ```bash

@@ -6,7 +6,8 @@ REFERENCE = "BTCUSDT"  # ETH en SOL kijken ook naar wat BTC doet
 NAMES = {"BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana"}
 # Max verlies per trade (in % van het geld van die bot) als de stop-loss geraakt wordt.
 DEFAULT_RISK = {"BTCUSDT": 5.0, "ETHUSDT": 5.0, "SOLUSDT": 5.0}
-INTERVAL_MS = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000}
+INTERVAL_MS = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000,
+               "1d": 86_400_000}
 
 
 @dataclass
