@@ -20,7 +20,8 @@ class Settings:
     allow_short: bool = False       # True = ook shorten (kostte in backtests geld)
     fee_rate: float = 0.0005        # Binance USDT-futures taker-fee 0,05% (spot: 0,001)
     slippage: float = 0.0002        # 0,02% aangenomen slippage per trade
-    funding_8h: float = 0.0001      # gemiddelde funding 0,01% per 8 uur die longs betalen (spot: 0)
+    funding_8h: float = 0.0001      # funding als de echte rate onbekend is: 0,01% per 8 uur
+    real_funding: bool = True       # echte Binance funding rates gebruiken als die bekend zijn
     maintenance_margin: float = 0.005  # onder 0,5% van de positie wordt je geliquideerd
 
     # Leren
@@ -28,9 +29,15 @@ class Settings:
     min_model_updates: int = 200   # model telt pas mee na zoveel gelabelde voorbeelden
     learning_rate: float = 0.05
     l2: float = 1e-4
-    bandit_discount: float = 0.995  # geheugen strategiekiezer: ~200 candles (~8 dagen)
-    decision_every: int = 6         # elke 6 candles (6 uur) opnieuw een strategie kiezen
+    bandit_discount: float = 0.998  # geheugen strategiekiezer: ~500 candles (~3 weken)
+    decision_every: int = 24        # elke 24 candles (1 dag) opnieuw een strategie kiezen
     confidence: float = 1.0         # hoe zeker een strategie moet zijn (hoger = voorzichtiger)
+    funding_features: bool = True   # funding rates als signaal voor de modellen
+
+    # Verbeteringen (0 of False = uit)
+    trend_days: int = 50            # alleen long als de koers boven het 50-daags gemiddelde staat
+    trailing_stop: bool = False     # stop-loss schuift mee met de koers (kostte in tests winst)
+    max_total_risk: float = 0.0     # max open risico over alle bots samen, bijv. 0.03 = 3% (0 = uit)
 
     # Risico (de bot kan deze regels niet wegleren). Percentages van je eigen geld,
     # behalve de stop-loss: die gaat over de koers.
@@ -102,3 +109,27 @@ def per_symbol(base, risk):
 
 def describe_risk(settings_by_symbol):
     return ", ".join(f"{s[:-4]} {st.risk_per_trade:.0%}" for s, st in settings_by_symbol.items())
+
+
+def apply_overrides(base, text):
+    """Pas instellingen aan met tekst zoals "trend_days=0,trailing_stop=false,interval=4h"."""
+    if not text:
+        return base
+    changes = {}
+    for part in text.split(","):
+        key, value = (x.strip() for x in part.split("="))
+        if key not in base.__dataclass_fields__:
+            raise ValueError(f"onbekende instelling: {key}")
+        current = getattr(base, key)
+        if isinstance(current, bool):
+            low = value.lower()
+            if low not in ("true", "false", "1", "0", "aan", "uit", "ja", "nee"):
+                raise ValueError(f"{key} moet aan/uit zijn, niet {value}")
+            changes[key] = low in ("true", "1", "aan", "ja")
+        elif isinstance(current, int):
+            changes[key] = int(value)
+        elif isinstance(current, float):
+            changes[key] = float(value)
+        else:
+            changes[key] = value
+    return replace(base, **changes)

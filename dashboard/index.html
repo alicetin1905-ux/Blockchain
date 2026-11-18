@@ -74,7 +74,7 @@ button:hover { border-color: var(--accent); }
 </head>
 <body>
 <div class="wrap">
-  <div class="banner">PAPER TRADING (long en short): alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
+  <div class="banner">PAPER TRADING: alle trades zijn gesimuleerd met nep-geld. Er wordt niets op een beurs gekocht of verkocht.</div>
   <header>
     <h1>Leerbots</h1>
     <span class="sub" id="meta">verbinden...</span>
@@ -196,6 +196,8 @@ function card(b) {
         <div><span>Gewonnen · verloren</span><b>${b.wins} · ${b.losses}</b></div>
         <div><span>Fees</span><b>${usd(b.fees)}</b></div>
         <div><span>Funding betaald</span><b>${usd(b.funding)}</b></div>
+        <div><span>Dagtrend (${b.trend_days}d)</span><b class="${b.trend > 0 ? "up" : b.trend < 0 ? "down" : ""}">${!b.trend_days ? "uit" : b.trend > 0 ? "▲ erboven" : b.trend < 0 ? "▼ eronder" : "nog onbekend"}</b></div>
+        <div><span>Funding nu (8u)</span><b>${b.funding_rate == null ? "-" : (b.funding_rate * 100).toFixed(4) + "%"}</b></div>
         <div><span>Verlies bij stop</span><b class="${b.loss_at_stop ? "down" : ""}">${b.loss_at_stop ? usd(-b.loss_at_stop) + " (" + (b.loss_at_stop / b.equity * 100).toFixed(1) + "%)" : "-"}</b></div>
         <div><span>Nieuwe trade nu</span><b>${b.size_now ? b.size_now.toFixed(2) + "x, stop " + (b.stop_distance_now * 100).toFixed(1) + "%" : "-"}</b></div>
       </div>
@@ -241,8 +243,10 @@ async function refresh() {
     last = d;
     const phase = { starten: "starten", opwarmen: "opwarmen: leert op geschiedenis", inhalen: "gemiste candles inhalen", live: "live" }[d.phase] || d.phase;
     $("#meta").textContent = `${phase} · candles van ${d.interval} · bijgewerkt ${d.updated ? new Date(d.updated).toLocaleTimeString("nl-NL") : "-"}`;
-    $("#err").style.display = d.error ? "block" : "none";
-    $("#err").textContent = d.error ? "Geen verbinding met Binance: " + d.error : "";
+    const warn = d.error ? "Geen verbinding met Binance: " + d.error
+      : d.funding_live === false ? "Live funding rates niet bereikbaar; de laatst bekende rate wordt gebruikt." : "";
+    $("#err").style.display = warn ? "block" : "none";
+    $("#err").textContent = warn;
     const t = d.totals;
     $("#totals").innerHTML = `
       <div class="tile"><div class="k">Totaal (3 bots)</div><div class="v">${usd(t.equity)}</div></div>

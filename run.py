@@ -10,7 +10,7 @@ import threading
 import time
 
 from leerbots.app import App
-from leerbots.config import INTERVAL_MS, Settings, describe_risk, parse_risk, per_symbol
+from leerbots.config import INTERVAL_MS, Settings, apply_overrides, describe_risk, parse_risk, per_symbol
 from leerbots.server import make_server
 
 
@@ -26,6 +26,8 @@ def main():
                          "'BTC=2,ETH=5,SOL=10' per munt (standaard 5 voor alle munten)")
     ap.add_argument("--short", action="store_true", help="ook shorten (standaard alleen long)")
     ap.add_argument("--no-short", action="store_true", help=argparse.SUPPRESS)  # oude optie: is nu de standaard
+    ap.add_argument("--set", dest="overrides", default="",
+                    help="andere instellingen, bijv. 'trend_days=0,trailing_stop=uit' (zie leerbots/config.py)")
     ap.add_argument("--warmup", type=int, default=3000, help="candles geschiedenis om op te leren bij de start")
     ap.add_argument("--poll", type=float, default=10, help="seconden tussen koerscontroles")
     ap.add_argument("--state", default="state", help="map waar de bots hun geheugen opslaan")
@@ -37,6 +39,7 @@ def main():
 
     base = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
                     allow_short=args.short)
+    base = apply_overrides(base, args.overrides)
     per = per_symbol(base, parse_risk(args.risk))
     app = App(per, args.state, args.warmup)
     server = make_server(app, args.host, args.port)

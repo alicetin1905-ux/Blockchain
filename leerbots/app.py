@@ -5,9 +5,10 @@ import pickle
 import threading
 import time
 
-from . import binance
+from . import binance, funding
 from .bot import VERSION, TradingBot
 from .config import REFERENCE, SYMBOLS, describe_risk
+from .risk import RiskBook
 
 log = logging.getLogger("leerbots")
 
@@ -60,6 +61,9 @@ class App:
         self.error = None
         self.phase = "starten"
         self.updated = None
+        self.funding = {s: [] for s in SYMBOLS}   # bekende funding rates per munt
+        self.funding_checked = 0
+        self.funding_live = None                   # True/False: live funding-API bereikbaar?
 
     # --------------------------------------------------------------- opslag
     def save(self):
@@ -96,14 +100,43 @@ class App:
             self.phase = "opwarmen"
             log.info("Nieuwe bots: opwarmen op %d candles geschiedenis (alleen leren)...", self.warmup)
             data = {sym: binance.history(sym, self.s.interval, self.warmup) for sym in SYMBOLS}
+            self._load_funding(data)
             with self.lock:
                 feed(self.bots, data, trade_from=None)
             for sym, bot in self.bots.items():
                 up, down = bot.model_up.metrics(), bot.model_down.metrics()
                 log.info("%s opgewarmd: %d candles, modelscore stijging %.3f / daling %.3f, strategie %s",
                          sym, bot.index, up.get("skill", 0.0), down.get("skill", 0.0), bot.active)
+        if self.s.max_total_risk:
+            RiskBook(self.bots, self.s.max_total_risk)
+        if self.funding_live is False:
+            log.warning("Live funding-API (fapi.binance.com) niet bereikbaar; de laatst bekende funding rate"
+                        " uit de maandarchieven wordt gebruikt.")
         self.save()
         self.phase = "live"
+
+    def _load_funding(self, data):
+        """Funding voor de opgehaalde candles: maandarchieven plus de live API."""
+        for sym, ks in data.items():
+            if not ks:
+                continue
+            start = min([ks[0]["t"]] + [t for t, _ in self.funding[sym][:1]])
+            arch = funding.history(sym, start, ks[-1]["ct"], cache_dir=os.path.join(self.state_dir, "funding"))
+            live = funding.recent(sym)
+            self.funding_live = bool(live)
+            self.funding[sym] = funding.merge(self.funding[sym], arch, live)
+            funding.attach(ks, self.funding[sym])
+        self.funding_checked = time.time()
+
+    def _refresh_funding(self, fresh):
+        if time.time() - self.funding_checked > 3600:
+            for sym in SYMBOLS:
+                live = funding.recent(sym)
+                self.funding_live = bool(live)
+                self.funding[sym] = funding.merge(self.funding[sym], live)
+            self.funding_checked = time.time()
+        for sym, ks in fresh.items():
+            funding.attach(ks, self.funding[sym])
 
     def catch_up(self):
         """Candles die gemist zijn (pc uit, netwerk weg) alleen gebruiken om te leren."""
@@ -114,6 +147,7 @@ class App:
             return
         n = min(missing, 5000)
         data = {sym: binance.history(sym, self.s.interval, n) for sym in SYMBOLS}
+        self._load_funding(data)
         with self.lock:
             done = feed(self.bots, data, trade_from=None)
         if done:
@@ -129,6 +163,7 @@ class App:
             log.warning("%s", e)
             return
         self.error = None
+        self._refresh_funding(fresh)
         now = int(time.time() * 1000)
         with self.lock:
             # Te groot gat (bijv. slaapstand)? Eerst inhalen zonder te traden.
@@ -174,6 +209,8 @@ class App:
             "interval": self.s.interval,
             "updated": self.updated,
             "error": self.error,
+            "funding_live": self.funding_live,
+            "funding_latest": {s: (f[-1] if f else None) for s, f in self.funding.items()},
             "settings": {**{k: getattr(self.s, k) for k in self.s.__dataclass_fields__},
                          "risk_per_symbol": {s: st.risk_per_trade for s, st in self.per.items()},
                          "risk_text": describe_risk(self.per)},

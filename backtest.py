@@ -17,10 +17,12 @@ import datetime as dt
 import json
 import os
 
-from leerbots import binance
+from leerbots import binance, funding
 from leerbots.app import feed
 from leerbots.bot import TradingBot
-from leerbots.config import INTERVAL_MS, REFERENCE, SYMBOLS, Settings, describe_risk, parse_risk, per_symbol
+from leerbots.config import (INTERVAL_MS, REFERENCE, SYMBOLS, Settings, apply_overrides, describe_risk,
+                             parse_risk, per_symbol)
+from leerbots.risk import RiskBook
 
 
 def load_candles(interval, n, offline, cache_dir="data"):
@@ -44,11 +46,18 @@ def load_candles(interval, n, offline, cache_dir="data"):
 
 def run(candles, days, per):
     """per = Settings per munt (zie per_symbol)."""
-    bots = {sym: TradingBot(sym, per[sym], use_ref=sym != REFERENCE) for sym in SYMBOLS}
+    bots = make_bots(per, SYMBOLS)
     ref = candles[REFERENCE]
     per_day = 86_400_000 // per[REFERENCE].interval_ms
     trade_from = ref[max(0, len(ref) - days * per_day)]["t"]
     feed(bots, candles, trade_from)
+    return bots
+
+
+def make_bots(per, symbols):
+    bots = {sym: TradingBot(sym, per[sym], use_ref=sym != REFERENCE) for sym in symbols}
+    if per[REFERENCE].max_total_risk:
+        RiskBook(bots, per[REFERENCE].max_total_risk)
     return bots
 
 
@@ -59,7 +68,14 @@ def header(per):
     print(f"PAPER-TRADING BACKTEST {s.interval}, ${s.start_capital:,.0f} per bot, {sides}, 1 positie per munt,")
     print(f"max {s.leverage:g}x hefboom, risico per trade: {describe_risk(per)},"
           f" stop-loss {s.stop_vol_mult:g}x de dagbeweging ({s.stop_min:.0%}-{s.stop_max:.0%})")
-    print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, funding {s.funding_8h:.2%}/8u meegerekend)")
+    extra = [f"trendfilter {s.trend_days} dagen" if s.trend_days else "geen trendfilter",
+             "trailing stop" if s.trailing_stop else "vaste stop",
+             f"totaalrisico max {s.max_total_risk:.0%}" if s.max_total_risk else "geen totaalrisico",
+             "funding als signaal" if s.funding_features else "geen funding-signaal",
+             f"geheugen {s.bandit_discount}", f"kiezen elke {s.decision_every} candles"]
+    print(", ".join(extra))
+    fund = "echte funding" if s.real_funding else f"funding {s.funding_8h:.2%}/8u"
+    print(f"(fee {s.fee_rate:.2%} + slippage {s.slippage:.2%} per trade, {fund} meegerekend)")
     print("=" * 84)
 
 
@@ -121,6 +137,22 @@ def run_periods(candles, periods, days, warmup_days, per):
     print("hh = kopen en houden (1x).  ! = noodstop geraakt (te ver onder de piek)")
 
 
+def _covering_cache(cache_dir, sym, interval, first, last):
+    """Een eerder opgehaald bestand dat deze jaren ook bevat (bijv. 2020-2026 voor 2020-2023)."""
+    if not os.path.isdir(cache_dir):
+        return None
+    prefix = f"{sym}_{interval}_"
+    for name in sorted(os.listdir(cache_dir)):
+        if name.startswith(prefix) and name.endswith(".json"):
+            try:
+                a, b = (int(x) for x in name[len(prefix):-5].split("-"))
+            except ValueError:
+                continue
+            if a <= first and b >= last and (a, b) != (first, last):
+                return os.path.join(cache_dir, name)
+    return None
+
+
 def load_years(interval, first, last, warmup_days, offline, cache_dir="data"):
     """Candles van (1 januari `first` min opwarmtijd) tot eind `last` (of nu)."""
     start = int(dt.datetime(first, 1, 1, tzinfo=dt.timezone.utc).timestamp() * 1000) - warmup_days * 86_400_000
@@ -129,7 +161,11 @@ def load_years(interval, first, last, warmup_days, offline, cache_dir="data"):
     out = {}
     for sym in SYMBOLS:
         path = os.path.join(cache_dir, f"{sym}_{interval}_{first}-{last}.json")
-        if offline or os.path.exists(path):
+        wider = _covering_cache(cache_dir, sym, interval, first, last)
+        if wider and not os.path.exists(path):
+            with open(wider) as f:
+                out[sym] = [k for k in json.load(f) if start <= k["t"] < end]
+        elif offline or os.path.exists(path):
             with open(path) as f:
                 out[sym] = json.load(f)
         else:
@@ -137,6 +173,8 @@ def load_years(interval, first, last, warmup_days, offline, cache_dir="data"):
             out[sym] = binance.history_range(sym, interval, start, end)
             with open(path, "w") as f:
                 json.dump(out[sym], f)
+        rates = funding.history(sym, start, end, cache_dir=os.path.join(cache_dir, "funding"))
+        funding.attach(out[sym], rates)
     return out
 
 
@@ -153,7 +191,7 @@ def run_years(candles, first, last, warmup_days, per):
         window = {s: ks for s, ks in window.items() if ks}
         if REFERENCE not in window:
             continue
-        bots = {sym: TradingBot(sym, per[sym], use_ref=sym != REFERENCE) for sym in window}
+        bots = make_bots(per, list(window))
         feed(bots, window, y0)
         cells, eq, start = [], 0.0, 0.0
         for sym in SYMBOLS:
@@ -169,9 +207,10 @@ def run_years(candles, first, last, warmup_days, per):
             cells.append(f"{st['pnl_pct']:+6.1f}% (hh {st['buy_hold_pct']:+5.0f}%)" + ("!" if st["risk"]["killed"] else " ") + late)
         total = (eq / start - 1) * 100
         totals.append(total)
-        upto = "" if candles[REFERENCE][-1]["t"] >= y1 - 3_600_000 else " (t/m nu)"
+        upto = "" if candles[REFERENCE][-1]["t"] >= y1 - per[REFERENCE].interval_ms else " (t/m nu)"
         print(f"{str(year) + upto:10}" + "".join(f"{c:>21}" for c in cells) + f"{total:+9.1f}%")
-    print(f"\nGemiddeld per jaar: {sum(totals) / len(totals):+.1f}%   Noodstop geraakt: {stops} van {n} keer")
+    print(f"\nGemiddeld per jaar: {sum(totals) / len(totals):+.1f}%   Slechtste jaar: {min(totals):+.1f}%"
+          f"   Noodstop geraakt: {stops} van {n} keer")
     print("hh = kopen en houden (1x).  ! = noodstop geraakt.  * = munt kwam later dat jaar op Binance")
     return totals
 
@@ -192,14 +231,17 @@ def main():
     ap.add_argument("--no-short", action="store_true", help=argparse.SUPPRESS)  # oude optie: is nu de standaard
     ap.add_argument("--stop-mult", type=float, default=Settings.stop_vol_mult,
                     help="stop-loss = zoveel keer de normale dagbeweging (standaard 2)")
+    ap.add_argument("--set", dest="overrides", default="",
+                    help="andere instellingen, bijv. 'trend_days=0,trailing_stop=uit,interval=4h'")
     ap.add_argument("--offline", action="store_true", help="data uit data/ gebruiken")
     args = ap.parse_args()
     settings = Settings(interval=args.interval, start_capital=args.capital, leverage=args.leverage,
                         allow_short=args.short, stop_vol_mult=args.stop_mult)
+    settings = apply_overrides(settings, args.overrides)
     per = per_symbol(settings, parse_risk(args.risk))
     if args.first:
         last = args.last or dt.datetime.now(dt.timezone.utc).year
-        candles = load_years(args.interval, args.first, last, args.warmup_days, args.offline)
+        candles = load_years(settings.interval, args.first, last, args.warmup_days, args.offline)
         run_years(candles, args.first, last, args.warmup_days, per)
         return
     per_day = 86_400_000 // settings.interval_ms

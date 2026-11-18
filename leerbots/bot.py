@@ -21,7 +21,7 @@ from .portfolio import Portfolio
 from .risk import RiskManager
 from .strategies import KEYS, STRATEGIES
 
-VERSION = 4
+VERSION = 5
 
 
 class TradingBot:
@@ -29,7 +29,7 @@ class TradingBot:
         self.version = VERSION
         self.symbol = symbol
         self.s = settings
-        self.engine = FeatureEngine(use_ref)
+        self.engine = FeatureEngine(use_ref, settings.funding_features)
         n = len(self.engine.names)
         self.model_up = OnlineLogReg(n, settings.learning_rate, settings.l2)    # kans op stijging
         self.model_down = OnlineLogReg(n, settings.learning_rate, settings.l2)  # kans op daling
@@ -40,6 +40,7 @@ class TradingBot:
         self.vsize = {k: 0.0 for k in KEYS}
         self.vstop = {k: None for k in KEYS}
         self.vcool = {k: -1 for k in KEYS}
+        self.vdist = {k: None for k in KEYS}      # stop-afstand bij openen (voor de trailing stop)
         self.virt_cost = {k: 0.0 for k in KEYS}
         self.stop_dist = None                      # huidige stop-afstand (op basis van beweeglijkheid)
         self.active = None
@@ -59,6 +60,12 @@ class TradingBot:
         self.history = deque(maxlen=3000)
         self.peak_equity = 0.0
         self.max_dd = 0.0
+        self.book = None                           # RiskBook: totaalrisico over alle bots
+        self.last_f = None                         # laatst bekende funding rate
+        self.daily = deque(maxlen=max(1, settings.trend_days))  # slotkoersen per dag
+        self.cur_day = None
+        self.day_close = None
+        self.trend = 0                             # +1 boven, -1 onder het daggemiddelde, 0 onbekend
 
     # ------------------------------------------------------------------ leren
     def step(self, k, ref=None, trade=True):
@@ -71,9 +78,13 @@ class TradingBot:
         self.last_price = c
         pf = self.portfolio
 
+        if k.get("f") is not None:
+            self.last_f = k["f"]
+        self._update_trend(k)
+        fund, signed = self._funding_rate()
         if trade:
             self._check_exits(k["o"], k["h"], k["l"], k["t"])
-            pf.charge_funding(c, self.s.funding_per_candle)
+            pf.charge_funding(c, fund, signed)
 
         if self.prev_close:
             self.bandit.update(self._virtual_rewards(k))
@@ -108,6 +119,8 @@ class TradingBot:
             new = STRATEGIES[a][1](feats["ind"], old, self.p, base)
             if not self.s.allow_short:
                 new = max(new, 0)
+            if self.s.trend_days and new * self.trend <= 0:   # alleen mee met de dagtrend
+                new = 0
             if self.index < self.vcool[a]:      # afkoelen na een virtuele stop-loss
                 new = 0
             if new != old:
@@ -115,14 +128,47 @@ class TradingBot:
                 self.virt[a] = new
                 self.vsize[a] = size if new else 0.0
                 self.vstop[a] = c * (1 - new * self.stop_dist) if new else None
+                self.vdist[a] = self.stop_dist if new else None
+            elif new and self.s.trailing_stop:  # trailing stop voor de virtuele positie
+                trail = c * (1 - new * self.vdist[a])
+                self.vstop[a] = max(self.vstop[a], trail) if new > 0 else min(self.vstop[a], trail)
 
         if self.active is None or self.index - self.last_decision >= self.s.decision_every:
             self._choose()
 
         if trade:
+            if self.s.trailing_stop:
+                pf.trail(c)
             self._trade(k)
             self._record(k["t"], c)
         return feats
+
+    def _update_trend(self, k):
+        """Dagtrend: staat de koers boven het gemiddelde van de laatste `trend_days` dagslotkoersen?"""
+        day = k["t"] // 86_400_000
+        if self.cur_day is not None and day != self.cur_day:
+            self.daily.append(self.day_close)
+        self.cur_day, self.day_close = day, k["c"]
+        if self.s.trend_days and len(self.daily) >= self.s.trend_days:
+            avg = sum(self.daily) / len(self.daily)
+            self.trend = 1 if k["c"] > avg else -1
+        else:
+            self.trend = 0
+
+    def _funding_rate(self):
+        """(rate per candle, signed). Echte rate als die bekend is, anders de voorzichtige schatting."""
+        if self.s.real_funding and self.last_f is not None:
+            return self.last_f * self.s.interval_ms / 28_800_000, True
+        return self.s.funding_per_candle, False
+
+    def open_risk(self):
+        """Wat deze bot vanaf de huidige koers verliest als de stop-loss geraakt wordt (in $, minstens 0)."""
+        pf = self.portfolio
+        if pf.qty == 0 or pf.stop is None or not self.last_price:
+            return 0.0
+        d = 1 if pf.qty > 0 else -1
+        exit_price = pf.stop * (1 - self.s.slippage * d)
+        return max(0.0, pf.qty * (self.last_price - exit_price)) + abs(pf.qty) * exit_price * self.s.fee_rate
 
     def _virtual_rewards(self, k):
         """Wat elke strategie deze candle verdiende, in bps van haar geld, na kosten, funding en stop-loss.
@@ -131,7 +177,7 @@ class TradingBot:
         virtuele positie op de stop (of op de open bij een gat) en volgt afkoeltijd.
         """
         p0, c = self.prev_close, k["c"]
-        fund = self.s.funding_per_candle
+        fund, signed = self._funding_rate()
         rewards = {}
         for a in KEYS:
             r = -self.virt_cost[a]
@@ -146,7 +192,7 @@ class TradingBot:
                 else:
                     exit_price = None
                 end = c if exit_price is None else exit_price
-                r += size * (d * (end / p0 - 1) - fund)
+                r += size * (d * (end / p0 - 1) - (d * fund if signed else fund))
                 if exit_price is not None:
                     r -= size * self.s.cost
                     self.virt[a], self.vsize[a], self.vstop[a] = 0, 0.0, None
@@ -186,9 +232,18 @@ class TradingBot:
             self._open(want, price, k["t"], reason)
 
     def _open(self, direction, price, t, reason):
-        dist = self.stop_dist
-        return self.portfolio.open(direction, self.s.size_for(dist), price, t, reason, self.active,
-                                   self.s.fee_rate, self.s.slippage, dist)
+        pf, dist = self.portfolio, self.stop_dist
+        size = self.s.size_for(dist)
+        if self.book is not None and self.s.max_total_risk:
+            wanted = size * pf.equity(price) * (dist + 2 * self.s.cost)   # risico van deze trade in $
+            allowed = self.book.available(self)
+            if allowed < wanted:
+                size *= allowed / wanted
+                reason += " (verkleind: totaalrisico)"
+            if size * pf.equity(price) < 10:   # te klein om te openen
+                self.risk_note = "totaalrisico vol"
+                return None
+        return pf.open(direction, size, price, t, reason, self.active, self.s.fee_rate, self.s.slippage, dist)
 
     def _close(self, price, t, reason):
         self.portfolio.close(price, t, reason, self.active, self.s.fee_rate, self.s.slippage)
@@ -309,6 +364,13 @@ class TradingBot:
             "unrealized_pct": (price / pf.entry - 1) * 100 if pf.entry else 0.0,
             "stop_price": pf.stop,
             "stop_distance_now": self.stop_dist,
+            "trend": self.trend,
+            "trend_days": self.s.trend_days,
+            "trailing_stop": self.s.trailing_stop,
+            "funding_rate": self.last_f,
+            "open_risk": self.open_risk(),
+            "total_risk_pct": self.book.used_pct() if self.book else None,
+            "max_total_risk": self.s.max_total_risk,
             "size_now": self.s.size_for(self.stop_dist) if self.stop_dist else None,
             "liquidation_price": pf.liquidation_price(self.s.maintenance_margin),
             "fees": pf.fees,

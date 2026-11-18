@@ -5,7 +5,9 @@ import unittest
 from leerbots.app import feed
 from leerbots.bandit import DiscountedThompson
 from leerbots.bot import TradingBot
-from leerbots.config import Settings, parse_risk, per_symbol
+from leerbots import funding
+from leerbots.config import Settings, apply_overrides, parse_risk, per_symbol
+from leerbots.risk import RiskBook
 from leerbots.model import OnlineLogReg
 from leerbots.portfolio import Portfolio
 from leerbots.risk import RiskManager
@@ -165,6 +167,68 @@ class RiskPerSymbolTest(unittest.TestCase):
         self.assertEqual([per[s].risk_per_trade for s in ("BTCUSDT", "ETHUSDT", "SOLUSDT")], [0.02, 0.05, 0.10])
         self.assertLess(per["BTCUSDT"].size_for(0.05), per["SOLUSDT"].size_for(0.05))
         self.assertEqual(per["BTCUSDT"].interval, per["SOLUSDT"].interval)
+
+
+class ImprovementsTest(unittest.TestCase):
+    def test_funding_attach_never_looks_ahead(self):
+        ks = synthetic(30)
+        rates = [(5 * HOUR, 0.0001), (13 * HOUR, 0.0003), (21 * HOUR, -0.0002)]
+        funding.attach(ks, rates)
+        self.assertNotIn("f", ks[4])                 # sluit om 4:59:59, vóór de eerste rate (5:00)
+        self.assertEqual(ks[5]["f"], 0.0001)         # sluit om 5:59:59: rate van 5:00 is bekend
+        self.assertEqual(ks[12]["f"], 0.0001)        # sluit om 12:59:59: rate van 13:00 nog niet
+        self.assertEqual(ks[13]["f"], 0.0003)
+        self.assertEqual(ks[29]["f"], -0.0002)
+
+    def test_real_funding_is_signed(self):
+        for d, expected in ((1, 499.75), (-1, 500.25)):
+            p = Portfolio(500)
+            p.open(d, 5.0, 100.0, 0, "t", "x", 0.0, 0.0, 0.02)
+            p.charge_funding(100.0, 0.0001, signed=True)  # positieve rate: long betaalt, short ontvangt
+            self.assertAlmostEqual(p.equity(100.0), expected)
+
+    def test_trailing_stop_only_moves_in_favour(self):
+        p = Portfolio(500)
+        p.open(1, 1.0, 100.0, 0, "t", "x", 0.0, 0.0, 0.05)
+        self.assertAlmostEqual(p.stop, 95.0)
+        p.trail(110.0)
+        self.assertAlmostEqual(p.stop, 104.5)
+        p.trail(105.0)
+        self.assertAlmostEqual(p.stop, 104.5)           # nooit terug
+        q = Portfolio(500)
+        q.open(-1, 1.0, 100.0, 0, "t", "x", 0.0, 0.0, 0.05)
+        q.trail(90.0)
+        self.assertAlmostEqual(q.stop, 94.5)
+
+    def test_trend_filter_blocks_long_in_downtrend(self):
+        s = Settings(trend_days=5, min_model_updates=50)
+        down = synthetic(800, drift=-0.002, vol=0.006, seed=3)
+        bots = {"BTCUSDT": TradingBot("BTCUSDT", s)}
+        feed(bots, {"BTCUSDT": down}, trade_from=down[300]["t"])
+        bot = bots["BTCUSDT"]
+        self.assertEqual(bot.trend, -1)
+        self.assertEqual(bot.portfolio.n_trades, 0)
+
+    def test_risk_book_shrinks_new_positions(self):
+        s = Settings(max_total_risk=0.02)
+        bots = {sym: TradingBot(sym, s) for sym in ("BTCUSDT", "ETHUSDT")}
+        for sym, bot in bots.items():
+            for k in synthetic(80, seed=11):
+                bot.step(k, trade=False)
+        RiskBook(bots, 0.02)
+        a, b = bots["BTCUSDT"], bots["ETHUSDT"]
+        a._open(1, a.last_price, 0, "t")
+        total = sum(x.portfolio.equity(x.last_price) for x in bots.values())
+        self.assertLessEqual(a.open_risk(), 0.02 * total + 1e-6)   # eerste positie al begrensd
+        b._open(1, b.last_price, 0, "t")
+        used = a.open_risk() + b.open_risk()
+        self.assertLessEqual(used, 0.02 * total * 1.01)
+
+    def test_apply_overrides(self):
+        s = apply_overrides(Settings(), "trend_days=0, trailing_stop=aan, interval=4h, max_total_risk=0.03")
+        self.assertEqual((s.trend_days, s.trailing_stop, s.interval, s.max_total_risk), (0, True, "4h", 0.03))
+        with self.assertRaises(ValueError):
+            apply_overrides(Settings(), "bestaat_niet=1")
 
 
 class BotTest(unittest.TestCase):

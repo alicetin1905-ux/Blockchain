@@ -44,3 +44,29 @@ class RiskManager:
         self.paused = False
         self.killed = False
         self.peak = equity
+
+
+class RiskBook:
+    """Bewaakt het open risico van alle bots samen.
+
+    BTC, ETH en SOL bewegen meestal samen. Drie posities van elk 5% risico zijn dan
+    eigenlijk één weddenschap van 15%. Een nieuwe positie wordt verkleind als het totale
+    open risico anders boven `max_total_risk` van al het geld zou komen.
+    """
+
+    def __init__(self, bots, max_total_risk):
+        self.bots = bots
+        self.cap = max_total_risk
+        for b in bots.values():
+            b.book = self
+
+    def available(self, me):
+        """Hoeveel risico (in $) `me` nog mag nemen."""
+        total = sum(b.portfolio.equity(b.last_price or 0.0) for b in self.bots.values())
+        used = sum(b.open_risk() for b in self.bots.values() if b is not me)
+        return max(0.0, self.cap * total - used)
+
+    def used_pct(self):
+        total = sum(b.portfolio.equity(b.last_price or 0.0) for b in self.bots.values())
+        used = sum(b.open_risk() for b in self.bots.values())
+        return used / total * 100 if total > 0 else 0.0

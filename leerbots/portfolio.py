@@ -21,6 +21,7 @@ class Portfolio:
         self.entry = 0.0
         self.opened_t = None
         self.stop = None          # stop-loss koers van de open positie
+        self.stop_dist = None     # afstand van de stop bij openen (voor de trailing stop)
         self.fees = 0.0
         self.funding = 0.0
         self.n_trades = 0
@@ -74,6 +75,7 @@ class Portfolio:
         self.qty = direction * notional / fill
         self.entry = fill
         self.stop = fill * (1 - direction * stop_distance)
+        self.stop_dist = stop_distance
         self.opened_t = t
         self.balance -= paid
         self.fees += paid
@@ -95,16 +97,28 @@ class Portfolio:
         net = pnl - getattr(self, "_open_fee", 0.0)   # resultaat van de hele trade incl. openingsfee
         self.wins += net > 0
         self.losses += net <= 0
-        self.qty, self.entry, self.opened_t, self.stop = 0.0, 0.0, None, None
+        self.qty, self.entry, self.opened_t, self.stop, self.stop_dist = 0.0, 0.0, None, None, None
         return self._log({"t": t, "side": "SLUIT " + side, "price": fill, "qty": gross / fill, "usd": gross,
                           "fee": paid, "reason": reason, "strategy": strategy, "pnl": net})
 
-    def charge_funding(self, price, rate):
-        """Funding over de positiegrootte. Voorzichtig gerekend: long én short betalen."""
+    def charge_funding(self, price, rate, signed=False):
+        """Funding over de positiegrootte.
+
+        signed=True: echte rate, longs betalen een positieve rate en shorts ontvangen die.
+        signed=False: geschatte rate, voorzichtig gerekend betalen long én short.
+        """
         if self.qty != 0 and rate:
-            cost = abs(self.qty) * price * rate
+            cost = (self.qty if signed else abs(self.qty)) * price * rate
             self.balance -= cost
             self.funding += cost
+
+    def trail(self, price):
+        """Trailing stop: schuif de stop mee met de koers, alleen in de gunstige richting."""
+        if self.qty == 0 or self.stop_dist is None:
+            return
+        d = 1 if self.qty > 0 else -1
+        new = price * (1 - d * self.stop_dist)
+        self.stop = max(self.stop, new) if d > 0 else min(self.stop, new)
 
     def liquidate(self, price, t, strategy, mm):
         """Gedwongen sluiting door de beurs. De resterende marge gaat verloren."""
@@ -115,7 +129,7 @@ class Portfolio:
                  "usd": abs(self.qty) * price, "fee": 0.0, "reason": "geliquideerd",
                  "strategy": strategy, "pnl": after - self.balance - getattr(self, "_open_fee", 0.0)}
         self.balance = after
-        self.qty, self.entry, self.opened_t, self.stop = 0.0, 0.0, None, None
+        self.qty, self.entry, self.opened_t, self.stop, self.stop_dist = 0.0, 0.0, None, None, None
         self.liquidations += 1
         self.losses += 1
         return self._log(trade)
